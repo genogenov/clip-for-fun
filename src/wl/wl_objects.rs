@@ -1,9 +1,12 @@
-use std::ptr;
+use std::{
+    marker::PhantomData,
+    ptr::{self},
+};
 
 pub trait WLObject {
-    const TYPE_ID: u32;
     type Ops: Into<u16>;
     type Events;
+    type Interface;
 }
 
 #[derive(Debug)]
@@ -13,28 +16,52 @@ pub struct MessageHeader {
     pub size: u16,
 }
 
-impl MessageHeader {
-    pub const WL_HEADER_SIZE: u16 = 8; // 4 bytes for object ID, 2 bytes for opcode, 2 bytes for message length
-
-    pub fn deserialize(buffer: &[u8], idx: usize) -> Self {
-        let object_id = unsafe { ptr::read(buffer.as_ptr().add(idx) as *const u32) };
-        let opcode = unsafe { ptr::read(buffer.as_ptr().add(idx + 4) as *const u16) };
-        let size = unsafe { ptr::read(buffer.as_ptr().add(idx + 6) as *const u16) };
-
+impl From<u64> for MessageHeader {
+    fn from(value: u64) -> Self {
+        let bytes: [u8; 8] = value.to_ne_bytes();
         Self {
-            object_id,
-            opcode,
-            size,
+            object_id: u32::from_ne_bytes(bytes[0..4].try_into().unwrap()),
+            opcode: u16::from_ne_bytes(bytes[4..6].try_into().unwrap()),
+            size: u16::from_ne_bytes(bytes[6..8].try_into().unwrap()),
         }
     }
 }
 
+impl MessageHeader {
+    pub const WL_HEADER_SIZE: u16 = 8; // 4 bytes for object ID, 2 bytes for opcode, 2 bytes for message length
+}
+
 pub struct Display;
 
+impl Display {
+    pub const TYPE_ID: u32 = 1;
+
+    pub fn parse_message(
+        &self,
+        header: &MessageHeader,
+        buffer: &[u8],
+        idx: usize,
+    ) -> Option<DisplayEvent> {
+        if header.object_id == Self::TYPE_ID && header.opcode == DisplayEvents::Error as u16 {
+            let target_object_id =
+                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx) as *const u32) };
+            let error_code =
+                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx + 4) as *const u32) };
+
+            return Some(DisplayEvent::Error {
+                target_object_id,
+                error_code,
+            });
+        }
+
+        None
+    }
+}
+
 impl WLObject for Display {
-    const TYPE_ID: u32 = 1;
     type Ops = DisplayOps;
     type Events = DisplayEvents;
+    type Interface = DisplayEvent;
 }
 
 macro_rules! wl_enum {
@@ -71,12 +98,76 @@ wl_enum! {
     }
 }
 
-pub struct Registry;
+pub struct RegistryInterface {
+    global_name: u32,
+    version: u32,
+}
+
+pub struct Registry {
+    pub type_id: u32,
+    pub data_device_manager: Option<RegistryInterface>,
+}
+
+impl Registry {
+    pub fn new(id: u32) -> Self {
+        Self {
+            type_id: id,
+            data_device_manager: None,
+        }
+    }
+
+    pub fn add_interface(
+        &mut self,
+        header: &MessageHeader,
+        buffer: &[u8],
+        idx: usize,
+    ) -> Option<WlRegistryEvent> {
+        if header.object_id == self.type_id && header.opcode == RegistryEvents::Global as u16 {
+            let global_name =
+                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx) as *const u32) };
+            let interface_name_len =
+                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx + 4) as *const u32) };
+
+            let interface_name_end = idx + 8 + interface_name_len as usize;
+            if interface_name_end > buffer.len() {
+                return None; // Not enough data for interface name
+            }
+            let interface_length_name_slice = &buffer[idx + 4..interface_name_end];
+
+            match interface_length_name_slice {
+                val if val == Registry::WL_DATA_DEVICE_MANAGER.1 => {
+                    let padded_len = (interface_name_len as usize + 3) & !3;
+                    let version_offset = idx + 8 + padded_len;
+                    if version_offset + 4 > buffer.len() {
+                        return None;
+                    }
+                    let version = unsafe {
+                        ptr::read_unaligned(buffer.as_ptr().add(version_offset) as *const u32)
+                    };
+                    self.data_device_manager = Some(RegistryInterface {
+                        global_name,
+                        version,
+                    });
+                    return Some(WlRegistryEvent::Global {
+                        global_name,
+                        version,
+                        interface: Some(WlRegistryGlobalInterface::WlDataDeviceManager),
+                    });
+                }
+
+                // Add more interfaces here as needed
+                _ => return None,
+            };
+        }
+
+        None
+    }
+}
 
 impl WLObject for Registry {
-    const TYPE_ID: u32 = 2;
     type Ops = RegistryOps;
     type Events = RegistryEvents;
+    type Interface = WlRegistryEvent;
 }
 
 wl_enum! {
@@ -97,89 +188,50 @@ pub enum WLCallbackEvents {
 
 #[repr(u8)]
 #[derive(Debug)]
-pub enum WlRegistryEvent<'a> {
+pub enum WlRegistryEvent {
     Global {
         global_name: u32,
-        interface: &'a str,
         version: u32,
+        interface: Option<WlRegistryGlobalInterface>,
     },
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum WlRegistryGlobalInterface {
+    WlDataDeviceManager,
+}
+
+macro_rules! wl_str_bytes {
+    ($s:expr) => {{
+        const S: &str = $s;
+        const LEN: usize = 4 + S.len() + 1; // 4 bytes for length prefix, string bytes, and null terminator
+        const RESULT: [u8; LEN] = {
+            let size = ((S.len() + 1) as u32).to_ne_bytes();
+            let b = S.as_bytes();
+            let mut r = [0u8; LEN];
+            r[0] = size[0]; r[1] = size[1];
+            r[2] = size[2]; r[3] = size[3];
+            r[4 + S.len()] = 0; // null terminator
+            let mut i = 0;
+            while i < b.len() {
+                r[i + 4] = b[i];
+                i += 1;
+            }
+            r
+        };
+        ($s, &RESULT)
+    }};
+}
+
 impl Registry {
-    pub const WL_DATA_DEVICE_MANAGER_NAME: &str = "wl_data_device_manager";
-
-    pub fn try_parse_event<'a>(
-        header: &MessageHeader,
-        buffer: &'a [u8],
-        idx: usize,
-    ) -> Option<WlRegistryEvent<'a>> {
-        if header.object_id == Self::TYPE_ID && header.opcode == RegistryEvents::Global as u16 {
-            let global_name = unsafe { ptr::read(buffer.as_ptr().add(idx) as *const u32) };
-            let interface_name_len =
-                unsafe { ptr::read(buffer.as_ptr().add(idx + 4) as *const u32) };
-
-            let interface_name =
-                std::str::from_utf8(&buffer[idx + 8..idx + 8 + interface_name_len as usize])
-                    .unwrap();
-
-            let padded_len = (interface_name_len as usize + 3) & !3;
-            let version = unsafe {
-                ptr::read(
-                    buffer
-                        .as_ptr()
-                        .add(idx + 8 + padded_len)
-                        as *const u32,
-                )
-            };
-
-            return Some(WlRegistryEvent::Global {
-                global_name: global_name,
-                interface: interface_name.trim_matches('\0'),
-                version,
-            });
-        }
-
-        None
-    }
+    pub const WL_DATA_DEVICE_MANAGER: (&str, &[u8]) = wl_str_bytes!("wl_data_device_manager");
 }
 
 #[repr(u16)]
 #[derive(Debug)]
-pub enum DisplayEvent<'a> {
+pub enum DisplayEvent {
     Error {
         target_object_id: u32,
         error_code: u32,
-        error_message: &'a str,
     },
-}
-
-impl Display {
-    pub fn try_parse_event<'a>(
-        header: &MessageHeader,
-        buffer: &'a [u8],
-        idx: usize,
-    ) -> Option<DisplayEvent<'a>> {
-        if header.object_id == Self::TYPE_ID && header.opcode == DisplayEvents::Error as u16 {
-            let tarhet_object_id = unsafe { ptr::read(buffer.as_ptr().add(idx + 8) as *const u32) };
-            let error_code = unsafe { ptr::read(buffer.as_ptr().add(idx + 12) as *const u32) };
-            let error_message_len =
-                unsafe { ptr::read(buffer.as_ptr().add(idx + 16) as *const u32) };
-            let error_message =
-                std::str::from_utf8(&buffer[idx + 20..idx + 20 + error_message_len as usize])
-                    .unwrap();
-
-            println!(
-                "Received error message from Wayland socket: target object ID {}, error code {}, message {}",
-                tarhet_object_id, error_code, error_message
-            );
-
-            return Some(DisplayEvent::Error {
-                target_object_id: tarhet_object_id,
-                error_code,
-                error_message: error_message,
-            });
-        }
-
-        None
-    }
 }

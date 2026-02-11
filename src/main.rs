@@ -1,11 +1,17 @@
 mod wl;
 
-use std::{arch::asm, env, io::{self, Write}};
+use std::{
+    arch::asm,
+    env,
+    io::{self, Write}, thread::sleep, time::Duration,
+};
 
-use crate::wl::wl_socket::WLSocket;
+use crate::wl::{
+    wl_objects::{Registry, WlRegistryGlobalInterface},
+    wl_socket::WLSocket,
+};
 
 fn main() {
-
     let socket_name = env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string());
     let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR is not set");
 
@@ -17,14 +23,10 @@ fn main() {
 
     // _ = soc.send_message(WLMessage::new(WLObject::Display, WL_GET_REGISTRY_OPCODE));
 
-    _ = soc.get_registry();
+    let registry = soc
+        .get_registry(WlRegistryGlobalInterface::WlDataDeviceManager)
+        .expect("Failed to get registry interface");
 
     println!("Sent get_registry message to the Wayland socket");
     _ = io::stdout().flush();
-
-    loop {
-        unsafe {
-            asm!("nop");
-        }
-    }
 }
