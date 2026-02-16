@@ -5,10 +5,9 @@ use std::{
     ptr,
 };
 
-use crate::wl::{
-    wl_objects::{
-        Display, DisplayEvent, DisplayOps, MessageHeader, Registry, RegistryEvents, RegistryInterface, RegistryOps, WLCallbackEvents, WLObject, WlRegistryEvent, WlRegistryGlobalInterface
-    },
+use crate::wl::wl_objects::{
+    Display, DisplayEvent, DisplayOps, MessageHeader, Registry, RegistryEvents, RegistryInterface,
+    RegistryOps, WLCallbackEvents, WLObject,
 };
 
 pub struct WLSocket {
@@ -33,35 +32,23 @@ impl WLSocket {
         })
     }
 
-    pub fn bind_registry_interface(
-        &mut self,
-        registry: &Registry,
-        interface: RegistryInterface,
-    ) -> std::io::Result<()> {
-        self.pack_message_header::<Registry>(
-            RegistryOps::Bind,
-            registry.type_id,
-        )?;
+    // pub fn bind_registry_interface(
+    //     &mut self,
+    //     registry: &Registry,
+    //     interface: RegistryInterface,
+    // ) -> std::io::Result<()> {
+    //     self.pack_message_header::<Registry>(RegistryOps::Bind, registry.type_id)?;
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    pub fn get_registry(
-        &mut self,
-        interface_to_find: WlRegistryGlobalInterface,
-    ) -> std::io::Result<Registry> {
+    pub fn get_registry(&mut self) -> std::io::Result<Registry> {
         let display = Display;
-        self.pack_message_header::<Display>(
-            DisplayOps::GetRegistry,
-            Display::TYPE_ID,
-        )?;
+        self.pack_message_header::<Display>(DisplayOps::GetRegistry, Display::TYPE_ID)?;
 
         let mut registry = Registry::new(self.current_object_id);
 
-        self.pack_message_header::<Display>(
-            DisplayOps::Sync,
-            Display::TYPE_ID,
-        )?;
+        self.pack_message_header::<Display>(DisplayOps::Sync, Display::TYPE_ID)?;
         let callback_id = self.current_object_id;
 
         self.flush_write_buffer()?;
@@ -90,54 +77,35 @@ impl WLSocket {
                     break;
                 }
 
-                if let Some(rev) = registry.add_interface(
-                    &header,
-                    &self.read_buffer,
-                    self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
-                ) {
-                    match &rev {
-                        WlRegistryEvent::Global {
-                            global_name: _,
-                            interface,
-                            version: _,
-                        } => match interface {
-                            Some(interface) if *interface == interface_to_find => {
-                                println!("Found global device manager {:?}", rev);
-
-                                // change this if we need more interfaces
-                                return Ok(registry);
-                            }
-                            _ => {}
-                        },
-                    }
-                }
-
-                if let Some(display_event) = display.parse_message(
-                    &header,
-                    &self.read_buffer,
-                    self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
-                ) {
-                    match display_event {
-                        DisplayEvent::Error { .. } => {
-                            println!(
-                                "Received error message from Wayland socket: {:?}",
-                                display_event
-                            );
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                "Received error message from Wayland socket",
-                            ));
-                        }
-                    }
-                }
-
-                if header.object_id == callback_id && header.opcode == WLCallbackEvents::Done as u16
+                if registry.add_interface(
+                        &header,
+                        &self.read_buffer,
+                        self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
+                    ) == None
                 {
-                    println!("Received callback done event, registry enumeration complete");
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Registry enumeration complete, interface not found",
-                    ));
+                    if let Some(display_event) = display.parse_message(
+                        &header,
+                        &self.read_buffer,
+                        self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
+                    ) {
+                        match display_event {
+                            DisplayEvent::Error { .. } => {
+                                println!(
+                                    "Received error message from Wayland socket: {:?}",
+                                    display_event
+                                );
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "Received error message from Wayland socket",
+                                ));
+                            }
+                        }
+                    } else if header.object_id == callback_id
+                        && header.opcode == WLCallbackEvents::Done as u16
+                    {
+                        println!("Received callback done event, registry enumeration complete");
+                        return Ok(registry);
+                    }
                 }
 
                 self.read_cursor += header.size as usize;
@@ -199,7 +167,8 @@ impl WLSocket {
     }
 
     fn flush_write_buffer(&mut self) -> std::io::Result<()> {
-        self.stream.write_all(&self.write_buffer[..self.write_cursor])?;
+        self.stream
+            .write_all(&self.write_buffer[..self.write_cursor])?;
         self.write_cursor = 0;
         Ok(())
     }

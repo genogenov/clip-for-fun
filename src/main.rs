@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::wl::{
-    wl_objects::{Registry, WlRegistryGlobalInterface},
+    wl_objects::{Registry},
     wl_socket::WLSocket,
 };
 
@@ -24,9 +24,9 @@ fn main() {
     // _ = soc.send_message(WLMessage::new(WLObject::Display, WL_GET_REGISTRY_OPCODE));
 
     let registry = soc
-        .get_registry(WlRegistryGlobalInterface::WlDataDeviceManager)
+        .get_registry()
         .expect("Failed to get registry interface");
 
-    println!("Sent get_registry message to the Wayland socket");
+    println!("Got registry: {:?}", registry);
     _ = io::stdout().flush();
 }

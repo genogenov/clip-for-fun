@@ -6,7 +6,6 @@ use std::{
 pub trait WLObject {
     type Ops: Into<u16>;
     type Events;
-    type Interface;
 }
 
 #[derive(Debug)]
@@ -61,7 +60,6 @@ impl Display {
 impl WLObject for Display {
     type Ops = DisplayOps;
     type Events = DisplayEvents;
-    type Interface = DisplayEvent;
 }
 
 macro_rules! wl_enum {
@@ -98,14 +96,80 @@ wl_enum! {
     }
 }
 
-pub struct RegistryInterface {
+#[derive(Debug)]
+pub struct RegistryInterface<I>
+where
+    I: WLObject,
+{
     global_name: u32,
     version: u32,
+    _marker: PhantomData<I>,
 }
 
+#[derive(Debug)]
+pub struct ExtDataControlManagerV1;
+impl WLObject for ExtDataControlManagerV1 {
+    type Ops = ExtDataControlManagerOps;
+    type Events = NoEvents;
+}
+wl_enum! {
+    pub enum ExtDataControlManagerOps {
+        CreateDataSource = 0,
+        GetDataDevice = 1,
+        Destroy = 2,
+    }
+}
+
+#[derive(Debug)]
+pub struct ZwlrDataControlManagerV1;
+impl WLObject for ZwlrDataControlManagerV1 {
+    type Ops = ZwlrDataControlManagerOps;
+    type Events = NoEvents;
+}
+wl_enum! {
+    pub enum ZwlrDataControlManagerOps {
+        CreateDataSource = 0,
+        GetDataDevice = 1,
+        Destroy = 2,
+    }
+}
+
+#[derive(Debug)]
+pub struct WlDataDeviceManager;
+impl WLObject for WlDataDeviceManager {
+    type Ops = WlDataDeviceManagerOps;
+    type Events = WlDataDeviceManagerEvents;
+}
+wl_enum! {
+    pub enum WlDataDeviceManagerOps {
+        CreateDataSource = 0,
+        GetDataDevice = 1,
+    }
+}
+
+#[repr(u8)]
+pub enum DragAndDrop {
+    None = 0,
+    Copy = 1,
+    Move = 2,
+    Ask = 4,
+}
+pub enum WlDataDeviceManagerEvents {
+    DragAndDrop(DragAndDrop),
+}
+
+pub enum NoEvents {}
+
+type DataControlManager = RegistryInterface<ExtDataControlManagerV1>;
+type ZwlrDataControlManager = RegistryInterface<ZwlrDataControlManagerV1>;
+type DataDeviceManager = RegistryInterface<WlDataDeviceManager>;
+
+#[derive(Debug)]
 pub struct Registry {
     pub type_id: u32,
-    pub data_device_manager: Option<RegistryInterface>,
+    pub data_device_manager: Option<DataDeviceManager>,
+    pub ext_data_control_manager: Option<DataControlManager>,
+    pub zwlr_data_control_manager: Option<ZwlrDataControlManager>,
 }
 
 impl Registry {
@@ -113,6 +177,8 @@ impl Registry {
         Self {
             type_id: id,
             data_device_manager: None,
+            zwlr_data_control_manager: None,
+            ext_data_control_manager: None,
         }
     }
 
@@ -121,7 +187,7 @@ impl Registry {
         header: &MessageHeader,
         buffer: &[u8],
         idx: usize,
-    ) -> Option<WlRegistryEvent> {
+    ) -> Option<()> {
         if header.object_id == self.type_id && header.opcode == RegistryEvents::Global as u16 {
             let global_name =
                 unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx) as *const u32) };
@@ -134,27 +200,48 @@ impl Registry {
             }
             let interface_length_name_slice = &buffer[idx + 4..interface_name_end];
 
+            #[inline(always)]
+            fn read_version(interface_name_len: u32, idx: usize, buffer: &[u8]) -> Option<u32> {
+                let padded_len = (interface_name_len as usize + 3) & !3;
+                let version_offset = idx + 8 + padded_len;
+                if version_offset + 4 > buffer.len() {
+                    return None;
+                }
+                unsafe {
+                    Some(ptr::read_unaligned(
+                        buffer.as_ptr().add(version_offset) as *const u32
+                    ))
+                }
+            }
+
             match interface_length_name_slice {
                 val if val == Registry::WL_DATA_DEVICE_MANAGER.1 => {
-                    let padded_len = (interface_name_len as usize + 3) & !3;
-                    let version_offset = idx + 8 + padded_len;
-                    if version_offset + 4 > buffer.len() {
-                        return None;
-                    }
-                    let version = unsafe {
-                        ptr::read_unaligned(buffer.as_ptr().add(version_offset) as *const u32)
-                    };
-                    self.data_device_manager = Some(RegistryInterface {
+                    let version = read_version(interface_name_len, idx, buffer)?;
+                    self.data_device_manager = Some(RegistryInterface::<WlDataDeviceManager> {
                         global_name,
                         version,
+                        _marker: PhantomData,
                     });
-                    return Some(WlRegistryEvent::Global {
-                        global_name,
-                        version,
-                        interface: Some(WlRegistryGlobalInterface::WlDataDeviceManager),
-                    });
+                    return Some(());
                 }
-
+                val if val == Registry::ZWLR_DATA_CONTROL_MANAGER_V1.1 => {
+                    let version = read_version(interface_name_len, idx, buffer)?;
+                    self.zwlr_data_control_manager = Some(RegistryInterface::<ZwlrDataControlManagerV1> {
+                        global_name,
+                        version,
+                        _marker: PhantomData,
+                    });
+                    return Some(());
+                }
+                val if val == Registry::EXT_DATA_CONTROL_MANAGER_V1.1 => {
+                    let version = read_version(interface_name_len, idx, buffer)?;
+                    self.ext_data_control_manager = Some(RegistryInterface::<ExtDataControlManagerV1> {
+                        global_name,
+                        version,
+                        _marker: PhantomData,
+                    });
+                    return Some(());
+                }
                 // Add more interfaces here as needed
                 _ => return None,
             };
@@ -167,7 +254,6 @@ impl Registry {
 impl WLObject for Registry {
     type Ops = RegistryOps;
     type Events = RegistryEvents;
-    type Interface = WlRegistryEvent;
 }
 
 wl_enum! {
@@ -184,21 +270,6 @@ pub enum RegistryEvents {
 #[repr(u16)]
 pub enum WLCallbackEvents {
     Done = 0,
-}
-
-#[repr(u8)]
-#[derive(Debug)]
-pub enum WlRegistryEvent {
-    Global {
-        global_name: u32,
-        version: u32,
-        interface: Option<WlRegistryGlobalInterface>,
-    },
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum WlRegistryGlobalInterface {
-    WlDataDeviceManager,
 }
 
 macro_rules! wl_str_bytes {
@@ -225,6 +296,10 @@ macro_rules! wl_str_bytes {
 
 impl Registry {
     pub const WL_DATA_DEVICE_MANAGER: (&str, &[u8]) = wl_str_bytes!("wl_data_device_manager");
+    pub const ZWLR_DATA_CONTROL_MANAGER_V1: (&str, &[u8]) =
+        wl_str_bytes!("zwlr_data_control_manager_v1");
+    pub const EXT_DATA_CONTROL_MANAGER_V1: (&str, &[u8]) =
+        wl_str_bytes!("ext_data_control_manager_v1");
 }
 
 #[repr(u16)]
