@@ -5,10 +5,7 @@ use std::{
 };
 
 use crate::wl::objects::{
-    MessageHeader, WLCallbackEvents, WLObject,
-    display::{Display, DisplayEvent, DisplayOps},
-    registry::{Registry, RegistryInterface, RegistryOps},
-    wl_str,
+    MessageHeader, WLCallbackEvents, WLObject, WlStr, display::{Display, DisplayEvent, DisplayOps}, registry::{Registry, RegistryInterface, RegistryOps}
 };
 
 pub struct WLSocket {
@@ -194,7 +191,7 @@ impl WLSocket {
     }
 
     #[inline(always)]
-    fn pack_wl_str(&mut self, s: &wl_str) {
+    fn pack_wl_str(&mut self, s: &WlStr) {
         // the bytes in wl_str are already prefixed with the length, and there is null terminator at the end, so we can just copy them directly to the write buffer
         let len = s.bytes.len() as u32;
         self.write_buffer[self.write_cursor..self.write_cursor + len as usize]

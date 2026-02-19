@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, ptr};
 
-use crate::wl::objects::{MessageHeader, WLObject, wl_enum, wl_str, wl_str_bytes};
+use crate::wl::objects::{MessageHeader, WLObject, wl_enum, WlStr, wl_str_bytes};
 
 #[derive(Debug)]
 pub struct RegistryInterface<I>
@@ -9,7 +9,7 @@ where
 {
     pub global_name: u32,
     pub version: u32,
-    pub interface_name: &'static wl_str,
+    pub interface_name: &'static WlStr,
     _marker: PhantomData<I>,
 }
 
@@ -213,10 +213,10 @@ impl Registry {
 }
 
 impl Registry {
-    pub const WL_DATA_DEVICE_MANAGER: wl_str = wl_str_bytes!("wl_data_device_manager");
-    pub const ZWLR_DATA_CONTROL_MANAGER_V1: wl_str = wl_str_bytes!("zwlr_data_control_manager_v1");
-    pub const EXT_DATA_CONTROL_MANAGER_V1: wl_str = wl_str_bytes!("ext_data_control_manager_v1");
-    pub const WL_SEAT: wl_str = wl_str_bytes!("wl_seat");
+    pub const WL_DATA_DEVICE_MANAGER: WlStr = wl_str_bytes!("wl_data_device_manager");
+    pub const ZWLR_DATA_CONTROL_MANAGER_V1: WlStr = wl_str_bytes!("zwlr_data_control_manager_v1");
+    pub const EXT_DATA_CONTROL_MANAGER_V1: WlStr = wl_str_bytes!("ext_data_control_manager_v1");
+    pub const WL_SEAT: WlStr = wl_str_bytes!("wl_seat");
 }
 
 impl WLObject for Registry {
