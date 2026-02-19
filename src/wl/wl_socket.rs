@@ -1,13 +1,14 @@
 use std::{
     io::{Read, Write},
-    mem::MaybeUninit,
     os::unix::net::UnixStream,
     ptr,
 };
 
-use crate::wl::wl_objects::{
-    Display, DisplayEvent, DisplayOps, MessageHeader, Registry, RegistryEvents, RegistryInterface,
-    RegistryOps, WLCallbackEvents, WLObject,
+use crate::wl::objects::{
+    MessageHeader, WLCallbackEvents, WLObject,
+    display::{Display, DisplayEvent, DisplayOps},
+    registry::{Registry, RegistryInterface, RegistryOps},
+    wl_str,
 };
 
 pub struct WLSocket {
@@ -17,6 +18,7 @@ pub struct WLSocket {
     write_cursor: usize,
     read_buffer: [u8; 4096],
     read_cursor: usize,
+    display: Display,
 }
 
 impl WLSocket {
@@ -29,32 +31,54 @@ impl WLSocket {
             write_cursor: 0,
             read_buffer: [0u8; 4096],
             read_cursor: 0,
+            display: Display,
         })
     }
 
-    // pub fn bind_registry_interface(
-    //     &mut self,
-    //     registry: &Registry,
-    //     interface: RegistryInterface,
-    // ) -> std::io::Result<()> {
-    //     self.pack_message_header::<Registry>(RegistryOps::Bind, registry.type_id)?;
+    pub fn bind_registry_interface<I>(
+        &mut self,
+        registry_id: u32,
+        interface: &RegistryInterface<I>,
+    ) -> std::io::Result<u32>
+    where
+        I: WLObject,
+    {
+        let bind_start = self.begin_message::<Registry>(RegistryOps::Bind, registry_id);
+        self.pack_u32(interface.global_name);
+        self.pack_wl_str(interface.interface_name);
+        self.pack_u32(interface.version);
+        let binding_id = self.pack_new_object_id();
+        self.end_message(bind_start);
 
-    //     Ok(())
-    // }
-
-    pub fn get_registry(&mut self) -> std::io::Result<Registry> {
-        let display = Display;
-        self.pack_message_header::<Display>(DisplayOps::GetRegistry, Display::TYPE_ID)?;
-
-        let mut registry = Registry::new(self.current_object_id);
-
-        self.pack_message_header::<Display>(DisplayOps::Sync, Display::TYPE_ID)?;
-        let callback_id = self.current_object_id;
+        let sync_start = self.begin_message::<Display>(DisplayOps::Sync, Display::TYPE_ID);
+        self.pack_new_object_id();
+        self.end_message(sync_start);
 
         self.flush_write_buffer()?;
+        Ok(binding_id)
+    }
 
+    pub fn get_registry(&mut self) -> std::io::Result<u32> {
+        let registry_start =
+            self.begin_message::<Display>(DisplayOps::GetRegistry, Display::TYPE_ID);
+        let registry_id = self.pack_new_object_id();
+        self.end_message(registry_start);
+
+        let sync_start = self.begin_message::<Display>(DisplayOps::Sync, Display::TYPE_ID);
+        self.pack_new_object_id();
+        self.end_message(sync_start);
+
+        self.flush_write_buffer()?;
+        Ok(registry_id)
+    }
+
+    pub fn dispatch_messages<F>(&mut self, mut handler: F) -> std::io::Result<()>
+    where
+        F: FnMut(&MessageHeader, &[u8], usize),
+    {
         let mut bytes_read = self.stream.read(&mut self.read_buffer)?;
         self.read_cursor = 0;
+        let callback_id = self.current_object_id;
 
         while bytes_read > 0 {
             while (self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize) <= bytes_read {
@@ -75,38 +99,37 @@ impl WLSocket {
                 }
                 if header.size as usize + self.read_cursor > bytes_read {
                     break;
-                }
-
-                if registry.add_interface(
-                        &header,
-                        &self.read_buffer,
-                        self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
-                    ) == None
+                } else if header.object_id == callback_id
+                    && header.opcode == WLCallbackEvents::Done as u16
                 {
-                    if let Some(display_event) = display.parse_message(
-                        &header,
-                        &self.read_buffer,
-                        self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
-                    ) {
-                        match display_event {
-                            DisplayEvent::Error { .. } => {
-                                println!(
-                                    "Received error message from Wayland socket: {:?}",
-                                    display_event
-                                );
-                                return Err(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    "Received error message from Wayland socket",
-                                ));
-                            }
+                    // println!("Received callback done event, registry enumeration complete");
+                    return Ok(());
+                } else if let Some(display_event) = self.display.parse_message(
+                    &header,
+                    &self.read_buffer,
+                    self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
+                ) {
+                    match display_event {
+                        DisplayEvent::Error {
+                            target_object_id,
+                            error_code,
+                        } => {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!(
+                                    "Received error message from Wayland socket: target_object_id={}, error_code={}",
+                                    target_object_id, error_code
+                                ),
+                            ));
                         }
-                    } else if header.object_id == callback_id
-                        && header.opcode == WLCallbackEvents::Done as u16
-                    {
-                        println!("Received callback done event, registry enumeration complete");
-                        return Ok(registry);
                     }
                 }
+
+                handler(
+                    &header,
+                    &self.read_buffer,
+                    self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize,
+                );
 
                 self.read_cursor += header.size as usize;
                 //sleep(Duration::from_secs(1));
@@ -118,14 +141,8 @@ impl WLSocket {
                 remaining_bytes = bytes_read - self.read_cursor;
                 self.read_buffer
                     .copy_within(self.read_cursor..bytes_read, 0);
-                // println!(
-                //     "Moved {} remaining bytes to the beginning of the buffer for the next read",
-                //     remaining_bytes
-                // );
             }
 
-            //sleep(Duration::from_secs(1));
-            //println!("Waiting for more messages from the Wayland socket...");
             let new_bytes_read = self.stream.read(&mut self.read_buffer[remaining_bytes..])?;
             if new_bytes_read == 0 {
                 break;
@@ -137,35 +154,61 @@ impl WLSocket {
 
         Err(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "Failed to read from Wayland socket",
+            "Failed to read all content from Wayland socket and did not find Done event",
         ))
     }
 
-    fn pack_message_header<T: WLObject>(
-        &mut self,
-        op: T::Ops,
-        type_id: u32,
-    ) -> Result<(), std::io::Error> {
-        if (self.write_cursor + 12) > self.write_buffer.len() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Write buffer overflow",
-            ));
-        }
-        self.current_object_id += 1;
-        const MSG_SIZE: u16 = MessageHeader::WL_HEADER_SIZE + 4; // header + new_id
+    #[inline(always)]
+    fn begin_message<T: WLObject>(&mut self, op: T::Ops, type_id: u32) -> usize {
         let opcode: u16 = op.into();
 
         let buf = &mut self.write_buffer[self.write_cursor..self.write_cursor + 12];
         buf[0..4].copy_from_slice(&type_id.to_ne_bytes());
         buf[4..6].copy_from_slice(&opcode.to_ne_bytes());
-        buf[6..8].copy_from_slice(&MSG_SIZE.to_ne_bytes());
-        buf[8..12].copy_from_slice(&self.current_object_id.to_ne_bytes());
 
-        self.write_cursor += 12;
-        Ok(())
+        let message_start = self.write_cursor;
+
+        self.write_cursor += MessageHeader::WL_HEADER_SIZE as usize;
+        message_start
     }
 
+    #[inline(always)]
+    fn pack_u32(&mut self, value: u32) {
+        self.write_buffer[self.write_cursor..self.write_cursor + 4]
+            .copy_from_slice(&value.to_ne_bytes());
+        self.write_cursor += 4;
+    }
+
+    #[inline(always)]
+    fn pack_new_object_id(&mut self) -> u32 {
+        self.current_object_id += 1;
+        self.pack_u32(self.current_object_id);
+        self.current_object_id
+    }
+
+    #[inline(always)]
+    fn end_message(&mut self, message_start: usize) {
+        let message_length = (self.write_cursor - message_start) as u16;
+        self.write_buffer[message_start + 6..message_start + 8]
+            .copy_from_slice(&message_length.to_ne_bytes());
+    }
+
+    #[inline(always)]
+    fn pack_wl_str(&mut self, s: &wl_str) {
+        // the bytes in wl_str are already prefixed with the length, and there is null terminator at the end, so we can just copy them directly to the write buffer
+        let len = s.bytes.len() as u32;
+        self.write_buffer[self.write_cursor..self.write_cursor + len as usize]
+            .copy_from_slice(s.bytes);
+        self.write_cursor += len as usize;
+        // we also need to ensure the string is 4 byte aligned by adding padding if necessary
+        let padding = (4 - (s.bytes.len() % 4)) % 4;
+        for _ in 0..padding {
+            self.write_buffer[self.write_cursor] = 0;
+            self.write_cursor += 1;
+        }
+    }
+
+    #[inline(always)]
     fn flush_write_buffer(&mut self) -> std::io::Result<()> {
         self.stream
             .write_all(&self.write_buffer[..self.write_cursor])?;

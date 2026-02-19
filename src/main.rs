@@ -3,13 +3,12 @@ mod wl;
 use std::{
     arch::asm,
     env,
-    io::{self, Write}, thread::sleep, time::Duration,
+    io::{self, Write},
+    thread::sleep,
+    time::Duration,
 };
 
-use crate::wl::{
-    wl_objects::{Registry},
-    wl_socket::WLSocket,
-};
+use crate::wl::{objects::registry::Registry, wl_socket::WLSocket};
 
 fn main() {
     let socket_name = env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string());
@@ -23,9 +22,39 @@ fn main() {
 
     // _ = soc.send_message(WLMessage::new(WLObject::Display, WL_GET_REGISTRY_OPCODE));
 
-    let registry = soc
-        .get_registry()
-        .expect("Failed to get registry interface");
+    let registry_id = soc.get_registry().unwrap();
+    let mut registry = Registry::new(registry_id);
+
+    soc.dispatch_messages(|header, buffer, offset| {
+        registry.add_interface(header, buffer, offset);
+    })
+    .unwrap();
+
+    if let Some(ext_data_control_manager) = &registry.ext_data_control_manager {
+        println!(
+            "Found ExtDataControlManagerV1({}) with id {} and version {}",
+            ext_data_control_manager.interface_name.str,
+            ext_data_control_manager.global_name,
+            ext_data_control_manager.version
+        );
+        let mgr_local_id = soc
+            .bind_registry_interface(registry_id, ext_data_control_manager)
+            .unwrap();
+        let seat_local_id = soc
+            .bind_registry_interface(registry_id, registry.wl_seat.as_ref().unwrap())
+            .unwrap();
+
+        println!("Bound ExtDataControlManagerV1 to local id {}, and WlSeat to local id {}", mgr_local_id, seat_local_id);
+        soc.dispatch_messages(|header, buffer, offset| {
+            println!(
+                "Received message with header: {:?}, buffer length: {}, offset: {}",
+                header,
+                buffer.len(),
+                offset
+            );
+        })
+        .unwrap();
+    }
 
     println!("Got registry: {:?}", registry);
     _ = io::stdout().flush();
