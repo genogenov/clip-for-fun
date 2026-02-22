@@ -1,10 +1,13 @@
-pub mod registry;
-pub mod display;
+pub mod wl_registry;
+pub mod wl_display;
+pub mod wl_data_device;
 
 pub trait WLObject {
     type Ops: Into<u16>;
     type Events;
 }
+
+pub enum NoEvents {}
 
 #[derive(Debug)]
 pub struct MessageHeader {

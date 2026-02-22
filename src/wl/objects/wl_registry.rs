@@ -1,8 +1,13 @@
+use std::fmt::Debug;
 use std::{marker::PhantomData, ptr};
 
-use crate::wl::objects::{MessageHeader, WLObject, wl_enum, WlStr, wl_str_bytes};
+use crate::wl::objects::wl_data_device::{DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager, ZwlrDataControlManager, ZwlrDataControlManagerV1};
+use crate::wl::{
+    objects::{MessageHeader, WLObject, WlStr, wl_enum, wl_str_bytes},
+    wl_buffered_stream::WLBufferedStream,
+};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RegistryInterface<I>
 where
     I: WLObject,
@@ -13,7 +18,31 @@ where
     _marker: PhantomData<I>,
 }
 
-#[derive(Debug)]
+pub struct BoundInterface<I>
+where
+    I: WLObject,
+{
+    pub local_id: u32,
+    pub interface: RegistryInterface<I>,
+    _marker: PhantomData<I>,
+}
+
+impl<I: WLObject> BoundInterface<I>  {
+    pub fn new(local_id: u32, interface: RegistryInterface<I>) -> Self {
+        Self {
+            local_id,
+            interface,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<I: WLObject> WLObject for BoundInterface<I> {
+    type Ops = I::Ops;
+    type Events = I::Events;
+}
+
+#[derive(Debug, Clone)]
 pub struct WlSeat;
 impl WLObject for WlSeat {
     type Ops = WlSeatOps;
@@ -28,74 +57,17 @@ wl_enum! {
     }
 }
 
-#[derive(Debug)]
-pub struct ExtDataControlManagerV1;
-impl WLObject for ExtDataControlManagerV1 {
-    type Ops = ExtDataControlManagerOps;
-    type Events = NoEvents;
-}
-wl_enum! {
-    pub enum ExtDataControlManagerOps {
-        CreateDataSource = 0,
-        GetDataDevice = 1,
-        Destroy = 2,
-    }
-}
 
-#[derive(Debug)]
-pub struct ZwlrDataControlManagerV1;
-impl WLObject for ZwlrDataControlManagerV1 {
-    type Ops = ZwlrDataControlManagerOps;
-    type Events = NoEvents;
-}
-wl_enum! {
-    pub enum ZwlrDataControlManagerOps {
-        CreateDataSource = 0,
-        GetDataDevice = 1,
-        Destroy = 2,
-    }
-}
-
-#[derive(Debug)]
-pub struct WlDataDeviceManager;
-impl WLObject for WlDataDeviceManager {
-    type Ops = WlDataDeviceManagerOps;
-    type Events = WlDataDeviceManagerEvents;
-}
-wl_enum! {
-    pub enum WlDataDeviceManagerOps {
-        CreateDataSource = 0,
-        GetDataDevice = 1,
-    }
-}
-
-#[repr(u8)]
-pub enum DragAndDrop {
-    None = 0,
-    Copy = 1,
-    Move = 2,
-    Ask = 4,
-}
-pub enum WlDataDeviceManagerEvents {
-    DragAndDrop(DragAndDrop),
-}
-
-#[repr(u8)]
-pub enum WLSeatCapability {
-    Pointer = 1,
-    Keyboard = 2,
-    Touch = 4,
-}
+// #[repr(u8)]
+// pub enum WLSeatCapability {
+//     Pointer = 1,
+//     Keyboard = 2,
+//     Touch = 4,
+// }
 
 pub enum WlSeatEvents {
-    Capabilities(WLSeatCapability),
+    // Capabilities(WLSeatCapability),
 }
-
-pub enum NoEvents {}
-
-type DataControlManager = RegistryInterface<ExtDataControlManagerV1>;
-type ZwlrDataControlManager = RegistryInterface<ZwlrDataControlManagerV1>;
-type DataDeviceManager = RegistryInterface<WlDataDeviceManager>;
 
 wl_enum! {
     pub enum RegistryOps {
@@ -108,16 +80,27 @@ pub enum RegistryEvents {
     Global = 0,
 }
 
-#[derive(Debug)]
-pub struct Registry {
-    pub type_id: u32,
+pub struct WlRegistry {
+    type_id: u32,
     pub data_device_manager: Option<DataDeviceManager>,
     pub ext_data_control_manager: Option<DataControlManager>,
     pub wl_seat: Option<RegistryInterface<WlSeat>>,
     pub zwlr_data_control_manager: Option<ZwlrDataControlManager>,
 }
 
-impl Registry {
+impl Debug for WlRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WlRegistry")
+            .field("type_id", &self.type_id)
+            .field("data_device_manager", &self.data_device_manager)
+            .field("ext_data_control_manager", &self.ext_data_control_manager)
+            .field("wl_seat", &self.wl_seat)
+            .field("zwlr_data_control_manager", &self.zwlr_data_control_manager)
+            .finish()
+    }
+}
+
+impl WlRegistry {
     pub fn new(id: u32) -> Self {
         Self {
             type_id: id,
@@ -126,6 +109,23 @@ impl Registry {
             ext_data_control_manager: None,
             wl_seat: None,
         }
+    }
+
+    pub fn bind<I>(
+        &self,
+        stream: &mut WLBufferedStream,
+        interface: RegistryInterface<I>,
+    ) -> std::io::Result<BoundInterface<I>>
+    where
+        I: WLObject,
+    {
+        let bind_start = stream.begin_message::<WlRegistry>(RegistryOps::Bind, self.type_id);
+        stream.pack_u32(interface.global_name);
+        stream.pack_wl_str(interface.interface_name);
+        stream.pack_u32(interface.version);
+        let binding_id = stream.pack_new_object_id();
+        stream.end_message(bind_start);
+        Ok(BoundInterface::new(binding_id, interface))
     }
 
     pub fn add_interface(
@@ -161,44 +161,44 @@ impl Registry {
             }
 
             match interface_length_name_slice {
-                val if val == Registry::WL_DATA_DEVICE_MANAGER.bytes => {
+                val if val == WlRegistry::WL_DATA_DEVICE_MANAGER.bytes => {
                     let version = read_version(interface_name_len, idx, buffer)?;
                     self.data_device_manager = Some(RegistryInterface::<WlDataDeviceManager> {
                         global_name,
                         version,
-                        interface_name: &Registry::WL_DATA_DEVICE_MANAGER,
+                        interface_name: &WlRegistry::WL_DATA_DEVICE_MANAGER,
                         _marker: PhantomData,
                     });
                     return Some(());
                 }
-                val if val == Registry::ZWLR_DATA_CONTROL_MANAGER_V1.bytes => {
+                val if val == WlRegistry::ZWLR_DATA_CONTROL_MANAGER_V1.bytes => {
                     let version = read_version(interface_name_len, idx, buffer)?;
                     self.zwlr_data_control_manager =
                         Some(RegistryInterface::<ZwlrDataControlManagerV1> {
                             global_name,
                             version,
-                            interface_name: &Registry::ZWLR_DATA_CONTROL_MANAGER_V1,
+                            interface_name: &WlRegistry::ZWLR_DATA_CONTROL_MANAGER_V1,
                             _marker: PhantomData,
                         });
                     return Some(());
                 }
-                val if val == Registry::EXT_DATA_CONTROL_MANAGER_V1.bytes => {
+                val if val == WlRegistry::EXT_DATA_CONTROL_MANAGER_V1.bytes => {
                     let version = read_version(interface_name_len, idx, buffer)?;
                     self.ext_data_control_manager =
                         Some(RegistryInterface::<ExtDataControlManagerV1> {
                             global_name,
                             version,
-                            interface_name: &Registry::EXT_DATA_CONTROL_MANAGER_V1,
+                            interface_name: &WlRegistry::EXT_DATA_CONTROL_MANAGER_V1,
                             _marker: PhantomData,
                         });
                     return Some(());
                 }
-                val if val == Registry::WL_SEAT.bytes => {
+                val if val == WlRegistry::WL_SEAT.bytes => {
                     let version = read_version(interface_name_len, idx, buffer)?;
                     self.wl_seat = Some(RegistryInterface::<WlSeat> {
                         global_name,
                         version,
-                        interface_name: &Registry::WL_SEAT,
+                        interface_name: &WlRegistry::WL_SEAT,
                         _marker: PhantomData,
                     });
                     return Some(());
@@ -212,14 +212,14 @@ impl Registry {
     }
 }
 
-impl Registry {
-    pub const WL_DATA_DEVICE_MANAGER: WlStr = wl_str_bytes!("wl_data_device_manager");
-    pub const ZWLR_DATA_CONTROL_MANAGER_V1: WlStr = wl_str_bytes!("zwlr_data_control_manager_v1");
-    pub const EXT_DATA_CONTROL_MANAGER_V1: WlStr = wl_str_bytes!("ext_data_control_manager_v1");
-    pub const WL_SEAT: WlStr = wl_str_bytes!("wl_seat");
+impl WlRegistry {
+    const WL_DATA_DEVICE_MANAGER: WlStr = wl_str_bytes!("wl_data_device_manager");
+    const ZWLR_DATA_CONTROL_MANAGER_V1: WlStr = wl_str_bytes!("zwlr_data_control_manager_v1");
+    const EXT_DATA_CONTROL_MANAGER_V1: WlStr = wl_str_bytes!("ext_data_control_manager_v1");
+    const WL_SEAT: WlStr = wl_str_bytes!("wl_seat");
 }
 
-impl WLObject for Registry {
+impl WLObject for WlRegistry {
     type Ops = RegistryOps;
     type Events = RegistryEvents;
 }
