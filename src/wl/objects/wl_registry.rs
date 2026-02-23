@@ -8,7 +8,7 @@ use crate::wl::{
     wl_buffered_stream::WLBufferedStream,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RegistryInterface<I>
 where
     I: WLObject,
@@ -41,7 +41,7 @@ impl<I: WLObject> WLObject for BoundInterface<I> {
     type Events = I::Events;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct WlSeat;
 impl WLObject for WlSeat {
     type Ops = WlSeatOps;

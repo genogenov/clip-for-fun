@@ -1,4 +1,4 @@
-use std::{os::fd::RawFd, ptr};
+use std::{os::fd::RawFd, path::Path, ptr};
 
 use crate::{
     unix_fd_stream::{UnixFdStream, WLFdBuffer},
@@ -17,7 +17,7 @@ pub struct WLBufferedStream {
 }
 
 impl WLBufferedStream {
-    pub fn connect(socket_path: &str) -> std::io::Result<Self> {
+    pub fn connect(socket_path: &Path) -> std::io::Result<Self> {
         let stream = UnixFdStream::connect(socket_path)?;
         Ok(Self {
             stream: stream,
@@ -41,12 +41,7 @@ impl WLBufferedStream {
     pub fn read_next_message(&mut self) -> std::io::Result<Option<(MessageHeader, &[u8], &mut WLFdBuffer, usize)>> {
         while self.bytes_read > 0 {
             while (self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize) <= self.bytes_read {
-                let header_u64 = unsafe {
-                    ptr::read_unaligned(
-                        self.read_buffer.as_ptr().add(self.read_cursor) as *const u64
-                    )
-                };
-                let header: MessageHeader = header_u64.into();
+                let header: MessageHeader = MessageHeader::parse(&self.read_buffer, self.read_cursor);
 
                 if header.size > self.read_buffer.len() as u16
                     || header.size < MessageHeader::WL_HEADER_SIZE
@@ -75,7 +70,14 @@ impl WLBufferedStream {
 
             let new_bytes_read = self.stream.read(&mut self.read_buffer[remaining_bytes..], &mut self.fd)?;
             if new_bytes_read == 0 {
-                break;
+                // EOF reached, no more messages to read.. if we have remaining bytes it means we have a partial message that we cant parse.
+                if remaining_bytes > 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "EOF reached with partial message in buffer",
+                    ));
+                }
+                return Ok(None);
             }
             self.bytes_read = remaining_bytes + new_bytes_read;
             self.read_cursor = 0;
@@ -135,10 +137,8 @@ impl WLBufferedStream {
         self.write_cursor += len as usize;
         // we also need to ensure the string is 4 byte aligned by adding padding if necessary
         let padding = (4 - (s.bytes.len() % 4)) % 4;
-        for _ in 0..padding {
-            self.write_buffer[self.write_cursor] = 0;
-            self.write_cursor += 1;
-        }
+        self.write_buffer[self.write_cursor..self.write_cursor + padding].fill(0);
+        self.write_cursor += padding;
     }
 
     #[inline(always)]
@@ -152,10 +152,8 @@ impl WLBufferedStream {
         self.write_buffer[self.write_cursor] = 0; // null terminator
         self.write_cursor += 1; // move past null terminator
         // we also need to ensure the string is 4 byte aligned by adding padding if necessary
-        let padding = (4 - (len % 4)) % 4;
-        for _ in 0..padding {
-            self.write_buffer[self.write_cursor] = 0;
-            self.write_cursor += 1;
-        }
+        let padding = ((4 - (len % 4)) % 4) as usize;
+        self.write_buffer[self.write_cursor..self.write_cursor + padding].fill(0);
+        self.write_cursor += padding;
     }
 }

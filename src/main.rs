@@ -5,6 +5,7 @@ use core::str;
 use std::{
     env,
     io::{self, Read, Write, stdin},
+    path::PathBuf,
     process::exit,
     thread::sleep,
     time::Duration,
@@ -20,11 +21,10 @@ use crate::wl::{
 };
 
 fn main() {
-    let socket_name = env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string());
-    let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR is not set");
-
-    let socket_path = format!("{}/{}", xdg_runtime_dir, socket_name);
-    debug_println!("Wayland socket path: {}", socket_path);
+    let socket_path =
+        PathBuf::from(env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR is not set"))
+            .join(env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string()));
+    debug_println!("Wayland socket path: {}", socket_path.display());
 
     let mut stream =
         WLBufferedStream::connect(&socket_path).expect("Could not connect to unix socket");
@@ -32,8 +32,9 @@ fn main() {
 
     let mut display = WlDisplay::new();
 
-    let mut in_vec = Vec::new();
+    let mut in_vec = Vec::with_capacity(1024);
     stdin().read_to_end(&mut in_vec).unwrap();
+    let in_str = String::from_utf8_lossy(&in_vec);
 
     let mut registry = display.get_registry(&mut stream).unwrap();
     display.roundtrip_sync(&mut stream).unwrap();
@@ -45,7 +46,7 @@ fn main() {
 
     debug_println!("Got registry: {:?}", registry);
 
-    if let Some(ext_data_control_manager) = registry.ext_data_control_manager.clone() {
+    if let Some(ext_data_control_manager) = registry.ext_data_control_manager {
         debug_println!(
             "Found ExtDataControlManagerV1({}) with id {} and version {}",
             ext_data_control_manager.interface_name.str,
@@ -54,10 +55,10 @@ fn main() {
         );
 
         let mgr_local = registry
-            .bind(&mut stream, ext_data_control_manager.clone())
+            .bind(&mut stream, ext_data_control_manager)
             .unwrap();
         let seat_local = registry
-            .bind(&mut stream, registry.wl_seat.clone().unwrap())
+            .bind(&mut stream, registry.wl_seat.unwrap())
             .unwrap();
 
         let local_data_device = mgr_local.get_data_device(&mut stream, seat_local.local_id);
@@ -75,8 +76,7 @@ fn main() {
             data_source.local_id
         );
 
-        let in_str = str::from_utf8(&in_vec).unwrap();
-        debug_println!("Read input data: {}", in_str);
+        debug_println!("Read input data: {:?}", in_str);
 
         display.roundtrip_sync(&mut stream).unwrap();
         display
@@ -121,11 +121,7 @@ fn main() {
                                     mime_type,
                                     fd
                                 );
-                                fds.fd_write_and_close(
-                                    fd,
-                                    str::from_utf8(&in_vec).unwrap().as_bytes(),
-                                )
-                                .unwrap();
+                                fds.fd_write_and_close(fd, in_str.as_bytes()).unwrap();
                             }
                             WlDataControlSourceEvent::Cancelled => {
                                 debug_println!("Received cancelled event. Exiting...");

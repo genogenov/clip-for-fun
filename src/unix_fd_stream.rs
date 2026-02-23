@@ -3,6 +3,7 @@ use std::{
         fd::{AsRawFd, RawFd},
         unix::net::UnixStream,
     },
+    path::Path,
     ptr,
 };
 
@@ -56,12 +57,7 @@ impl cmsghdr {
         if self.cmsg_level == SOL_SOCKET && self.cmsg_type == SCM_RIGHTS {
             let data_ptr = unsafe { (self as *const cmsghdr).add(1) as *const RawFd };
             let fd_count = (self.cmsg_len - CMSG_FD_OFFSET) / std::mem::size_of::<RawFd>();
-            let data_slice = unsafe {
-                std::slice::from_raw_parts(
-                    data_ptr,
-                    fd_count,
-                )
-            };
+            let data_slice = unsafe { std::slice::from_raw_parts(data_ptr, fd_count) };
             fd_buffer.push_in_fds(data_slice)?;
 
             debug_println!("Received {} file descriptors", fd_count);
@@ -121,7 +117,7 @@ impl WLFdBuffer {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Not enough space in buffer for file descriptors",
-            )); 
+            ));
         }
         for &fd in fds {
             self.in_fds[(self.in_fds_cursor + self.in_fd_count) % self.in_fds.len()] = fd;
@@ -132,6 +128,7 @@ impl WLFdBuffer {
 
     pub fn fd_write_and_close(&self, fd: RawFd, data: &[u8]) -> std::io::Result<()> {
         let mut bytes_written = 0;
+        let mut zero_retry_count = 0;
         while bytes_written < data.len() {
             let bytes_written_or_err = unsafe {
                 crate::unix_fd_stream::write(
@@ -143,6 +140,14 @@ impl WLFdBuffer {
             if bytes_written_or_err > 0 {
                 bytes_written += bytes_written_or_err as usize;
             } else if bytes_written_or_err == 0 {
+                zero_retry_count += 1;
+                if zero_retry_count > 10 {
+                    unsafe { close(fd) };
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "write returned zero too many times",
+                    ));
+                }
                 continue; // retry on zero write, which can happen with some special files
             } else {
                 let error = std::io::Error::last_os_error();
@@ -167,7 +172,7 @@ pub struct UnixFdStream {
 }
 
 impl UnixFdStream {
-    pub fn connect(path: &str) -> std::io::Result<Self> {
+    pub fn connect(path: &Path) -> std::io::Result<Self> {
         let stream = UnixStream::connect(path)?;
         let stream_fd = stream.as_raw_fd();
         Ok(Self { stream, stream_fd })
@@ -183,41 +188,49 @@ impl UnixFdStream {
             iov_len: buffer.len(),
         };
 
-        let mut ctrl_buffer = AlignedCmsghdr([0u8; CTRL_BUFFER_SIZE]);
+        loop {
+            let mut ctrl_buffer = AlignedCmsghdr([0u8; CTRL_BUFFER_SIZE]);
 
-        let mut msg = msghdr {
-            msg_name: ptr::null_mut(),
-            msg_namelen: 0,
-            msg_iov: &mut iovec,
-            msg_iovlen: 1,
-            msg_control: ctrl_buffer.0.as_mut_ptr() as *mut std::ffi::c_void,
-            msg_controllen: ctrl_buffer.0.len(),
-            msg_flags: 0,
-        };
+            let mut msg = msghdr {
+                msg_name: ptr::null_mut(),
+                msg_namelen: 0,
+                msg_iov: &mut iovec,
+                msg_iovlen: 1,
+                msg_control: ctrl_buffer.0.as_mut_ptr() as *mut std::ffi::c_void,
+                msg_controllen: ctrl_buffer.0.len(),
+                msg_flags: 0,
+            };
 
-        let bytes_read_or_err = unsafe { recvmsg(self.stream_fd, &mut msg, MSG_CMSG_CLOEXEC) };
+            let bytes_read_or_err = unsafe { recvmsg(self.stream_fd, &mut msg, MSG_CMSG_CLOEXEC) };
 
-        if bytes_read_or_err < 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::Interrupted {
-                return self.read(buffer, fd_buffer); // retry on EINTR
-            } else {
-                return Err(error);
+            if bytes_read_or_err < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    continue; // retry on EINTR
+                } else {
+                    return Err(error);
+                }
             }
-        }
-        if bytes_read_or_err == 0 {
-            return Ok(0); // EOF
-        }
+            if bytes_read_or_err == 0 {
+                return Ok(0); // EOF
+            }
 
-        let mut ctrl_buf_cursor = 0;
+            let mut ctrl_buf_cursor = 0;
 
-        while ctrl_buf_cursor < msg.msg_controllen {
-            let cmsg = unsafe { &mut *(msg.msg_control.add(ctrl_buf_cursor) as *mut cmsghdr) };
-            cmsg.fds_into(fd_buffer)?;
-            ctrl_buf_cursor += cmsg_align(cmsg.cmsg_len);
+            while ctrl_buf_cursor < msg.msg_controllen {
+                let cmsg = unsafe { &mut *(msg.msg_control.add(ctrl_buf_cursor) as *mut cmsghdr) };
+                if cmsg.cmsg_len == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Invalid control message with zero length",
+                    ));
+                }
+                cmsg.fds_into(fd_buffer)?;
+                ctrl_buf_cursor += cmsg_align(cmsg.cmsg_len);
+            }
+
+            return Ok(bytes_read_or_err as usize);
         }
-
-        return Ok(bytes_read_or_err as usize);
     }
 
     #[allow(unused_assignments)]
@@ -259,7 +272,7 @@ impl UnixFdStream {
                 continue; // retry sending the remaining data
             }
 
-            return Ok(bytes_sent_or_err);
+            return Ok(total_bytes_sent as isize);
         }
     }
 }

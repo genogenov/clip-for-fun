@@ -1,9 +1,11 @@
-pub mod wl_registry;
-pub mod wl_display;
-pub mod wl_data_managers;
+use std::{fmt::Debug, ptr};
+
 pub mod wl_data_control_device;
+pub mod wl_data_managers;
 pub mod wl_data_offer;
 pub mod wl_data_source;
+pub mod wl_display;
+pub mod wl_registry;
 
 pub trait WLObject {
     type Ops: Into<u16>;
@@ -23,19 +25,18 @@ pub struct MessageHeader {
     pub size: u16,
 }
 
-impl From<u64> for MessageHeader {
-    fn from(value: u64) -> Self {
-        let bytes: [u8; 8] = value.to_ne_bytes();
-        Self {
-            object_id: u32::from_ne_bytes(bytes[0..4].try_into().unwrap()),
-            opcode: u16::from_ne_bytes(bytes[4..6].try_into().unwrap()),
-            size: u16::from_ne_bytes(bytes[6..8].try_into().unwrap()),
-        }
-    }
-}
-
 impl MessageHeader {
     pub const WL_HEADER_SIZE: u16 = 8; // 4 bytes for object ID, 2 bytes for opcode, 2 bytes for message length
+
+    pub fn parse(buffer: &[u8], offset: usize) -> Self {
+        unsafe {
+            Self {
+                object_id: ptr::read_unaligned(buffer.as_ptr().add(offset) as *const u32),
+                opcode: ptr::read_unaligned(buffer.as_ptr().add(offset + 4) as *const u16),
+                size: ptr::read_unaligned(buffer.as_ptr().add(offset + 6) as *const u16),
+            }
+        }
+    }
 }
 
 macro_rules! wl_enum {
@@ -58,7 +59,6 @@ macro_rules! wl_enum {
         }
     };
 }
-use std::fmt::Debug;
 
 pub(crate) use wl_enum;
 

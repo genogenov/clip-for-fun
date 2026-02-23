@@ -31,7 +31,7 @@ pub trait DataDeviceManagerExt {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ExtDataControlManagerV1;
 impl WLObject for ExtDataControlManagerV1 {
     type Ops = ExtDataControlManagerOps;

@@ -52,11 +52,11 @@ impl WlDataControlSource {
             if mime_type_end > buffer.len() {
                 return None; // Not enough data
             }
-            let interface_length_name_slice = &buffer[idx..mime_type_end];
+            //let interface_length_name_slice = &buffer[idx..mime_type_end];
 
             // alloc... think about a more performant way to do this without allocation, maybe preallocated str buffers.
-            let mime_type: String = String::from_utf8_lossy(interface_length_name_slice).into_owned();
-            return Some(WlDataControlSourceEvent::Send { mime_type, fd: fds.pop_last_in_fd().unwrap() });
+            //let mime_type: String = String::from_utf8_lossy(interface_length_name_slice).into_owned();
+            return Some(WlDataControlSourceEvent::Send { mime_type: String::new(), fd: fds.pop_last_in_fd().unwrap() });
         } else if header.opcode == WlDataControlSourceEvents::Cancelled as u16 {
             return Some(WlDataControlSourceEvent::Cancelled);
         }
