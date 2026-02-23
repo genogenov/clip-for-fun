@@ -1,4 +1,12 @@
-use std::{os::{fd::{AsRawFd, RawFd}, unix::net::UnixStream}, ptr};
+use std::{
+    os::{
+        fd::{AsRawFd, RawFd},
+        unix::net::UnixStream,
+    },
+    ptr,
+};
+
+use crate::wl::debug_println;
 
 const FD_BUFFER_LEN: usize = 32;
 
@@ -44,22 +52,21 @@ const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<R
 struct AlignedCmsghdr([u8; CTRL_BUFFER_SIZE]);
 
 impl cmsghdr {
-    fn fds_into(&self, buf: &mut [RawFd], buf_idx: usize) -> std::io::Result<usize> {
+    fn fds_into(&self, fd_buffer: &mut WLFdBuffer) -> std::io::Result<()> {
         if self.cmsg_level == SOL_SOCKET && self.cmsg_type == SCM_RIGHTS {
             let data_ptr = unsafe { (self as *const cmsghdr).add(1) as *const RawFd };
-            let data_slice =
-                unsafe { std::slice::from_raw_parts(data_ptr, (self.cmsg_len - CMSG_FD_OFFSET) / std::mem::size_of::<RawFd>()) };
-            let fd_count = data_slice.len();
-            if buf.len() - buf_idx < fd_count {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Not enough space in buffer for file descriptors",
-                ));
-            }
-            buf[buf_idx..buf_idx + fd_count].copy_from_slice(&data_slice[..]);
-            return Ok(fd_count);
+            let fd_count = (self.cmsg_len - CMSG_FD_OFFSET) / std::mem::size_of::<RawFd>();
+            let data_slice = unsafe {
+                std::slice::from_raw_parts(
+                    data_ptr,
+                    fd_count,
+                )
+            };
+            fd_buffer.push_in_fds(data_slice)?;
+
+            debug_println!("Received {} file descriptors", fd_count);
         }
-        Ok(0)
+        Ok(())
     }
 }
 
@@ -75,39 +82,102 @@ const fn cmsg_space(len: usize) -> usize {
 unsafe extern "C" {
     fn recvmsg(sockfd: RawFd, msg: *mut msghdr, flags: i32) -> isize;
     fn sendmsg(sockfd: RawFd, msg: *const msghdr, flags: i32) -> isize;
+    fn pipe2(fd: *mut RawFd, flags: i32) -> RawFd;
+    fn close(fd: RawFd) -> i32;
+    fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
+}
+
+pub struct WLFdBuffer {
+    in_fds: [RawFd; FD_BUFFER_LEN],
+    in_fd_count: usize,
+    in_fds_cursor: usize,
+    out_fds: [RawFd; FD_BUFFER_LEN],
+}
+
+impl WLFdBuffer {
+    pub fn new() -> Self {
+        Self {
+            in_fds: [0; FD_BUFFER_LEN],
+            in_fd_count: 0,
+            in_fds_cursor: 0,
+            out_fds: [0; FD_BUFFER_LEN],
+        }
+    }
+
+    pub fn pop_last_in_fd(&mut self) -> Option<RawFd> {
+        // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
+        if self.in_fd_count == 0 {
+            return None;
+        }
+        let fd = self.in_fds[self.in_fds_cursor];
+        self.in_fds_cursor = (self.in_fds_cursor + 1) % self.in_fds.len();
+        self.in_fd_count -= 1;
+        Some(fd)
+    }
+
+    fn push_in_fds(&mut self, fds: &[RawFd]) -> std::io::Result<()> {
+        // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
+        if fds.len() > self.in_fds.len() - self.in_fd_count {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Not enough space in buffer for file descriptors",
+            )); 
+        }
+        for &fd in fds {
+            self.in_fds[(self.in_fds_cursor + self.in_fd_count) % self.in_fds.len()] = fd;
+            self.in_fd_count += 1;
+        }
+        Ok(())
+    }
+
+    pub fn fd_write_and_close(&self, fd: RawFd, data: &[u8]) -> std::io::Result<()> {
+        let mut bytes_written = 0;
+        while bytes_written < data.len() {
+            let bytes_written_or_err = unsafe {
+                crate::unix_fd_stream::write(
+                    fd,
+                    data.as_ptr().add(bytes_written),
+                    data.len() - bytes_written,
+                )
+            };
+            if bytes_written_or_err > 0 {
+                bytes_written += bytes_written_or_err as usize;
+            } else if bytes_written_or_err == 0 {
+                continue; // retry on zero write, which can happen with some special files
+            } else {
+                let error = std::io::Error::last_os_error();
+                match error.raw_os_error() {
+                    Some(4) => continue, // EINTR
+                    Some(32) => break,   // EPIPE, the reader has closed the pipe
+                    _ => {
+                        unsafe { close(fd) };
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        unsafe { close(fd) };
+        Ok(())
+    }
 }
 
 pub struct UnixFdStream {
     stream: UnixStream,
     stream_fd: RawFd,
-    in_fds: [RawFd; FD_BUFFER_LEN],
-    in_fd_count: usize,
-    out_fds: [RawFd; FD_BUFFER_LEN],
 }
 
 impl UnixFdStream {
     pub fn connect(path: &str) -> std::io::Result<Self> {
         let stream = UnixStream::connect(path)?;
         let stream_fd = stream.as_raw_fd();
-        Ok(Self {
-            stream,
-            stream_fd,
-            in_fds: [0; FD_BUFFER_LEN],
-            in_fd_count: 0,
-            out_fds: [0; FD_BUFFER_LEN],
-        })
+        Ok(Self { stream, stream_fd })
     }
 
-    pub fn pop_last_in_fd(&mut self) -> Option<RawFd> {
-        if self.in_fd_count == 0 {
-            None
-        } else {
-            self.in_fd_count -= 1;
-            Some(self.in_fds[self.in_fd_count])
-        }
-    }
-
-    pub fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+    pub fn read(
+        &mut self,
+        buffer: &mut [u8],
+        fd_buffer: &mut WLFdBuffer,
+    ) -> std::io::Result<usize> {
         let mut iovec = iovec {
             iov_base: buffer.as_mut_ptr(),
             iov_len: buffer.len(),
@@ -130,7 +200,7 @@ impl UnixFdStream {
         if bytes_read_or_err < 0 {
             let error = std::io::Error::last_os_error();
             if error.kind() == std::io::ErrorKind::Interrupted {
-                return self.read(buffer); // retry on EINTR
+                return self.read(buffer, fd_buffer); // retry on EINTR
             } else {
                 return Err(error);
             }
@@ -143,8 +213,7 @@ impl UnixFdStream {
 
         while ctrl_buf_cursor < msg.msg_controllen {
             let cmsg = unsafe { &mut *(msg.msg_control.add(ctrl_buf_cursor) as *mut cmsghdr) };
-            let fd_count = cmsg.fds_into(&mut self.in_fds, self.in_fd_count)?;
-            self.in_fd_count += fd_count;
+            cmsg.fds_into(fd_buffer)?;
             ctrl_buf_cursor += cmsg_align(cmsg.cmsg_len);
         }
 
@@ -184,7 +253,6 @@ impl UnixFdStream {
             total_bytes_sent += bytes_sent_or_err as usize;
 
             if total_bytes_sent < buff.len() {
-                // println!("Partial write");
                 iov.iov_base = unsafe { buff.as_ptr().add(total_bytes_sent) as *mut _ };
                 iov.iov_len = buff.len() - total_bytes_sent;
 

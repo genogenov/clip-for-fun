@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 use std::{marker::PhantomData, ptr};
 
-use crate::wl::objects::wl_data_device::{DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager, ZwlrDataControlManager, ZwlrDataControlManagerV1};
+use crate::unix_fd_stream::WLFdBuffer;
+use crate::wl::objects::wl_data_managers::{DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager, ZwlrDataControlManager, ZwlrDataControlManagerV1};
 use crate::wl::{
     objects::{MessageHeader, WLObject, WlStr, wl_enum, wl_str_bytes},
     wl_buffered_stream::WLBufferedStream,
@@ -24,7 +25,6 @@ where
 {
     pub local_id: u32,
     pub interface: RegistryInterface<I>,
-    _marker: PhantomData<I>,
 }
 
 impl<I: WLObject> BoundInterface<I>  {
@@ -32,7 +32,6 @@ impl<I: WLObject> BoundInterface<I>  {
         Self {
             local_id,
             interface,
-            _marker: PhantomData,
         }
     }
 }

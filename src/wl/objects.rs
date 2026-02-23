@@ -1,6 +1,9 @@
 pub mod wl_registry;
 pub mod wl_display;
-pub mod wl_data_device;
+pub mod wl_data_managers;
+pub mod wl_data_control_device;
+pub mod wl_data_offer;
+pub mod wl_data_source;
 
 pub trait WLObject {
     type Ops: Into<u16>;
@@ -8,6 +11,10 @@ pub trait WLObject {
 }
 
 pub enum NoEvents {}
+
+wl_enum! {
+    pub enum NoOps {_NoOp = 0}
+}
 
 #[derive(Debug)]
 pub struct MessageHeader {
@@ -51,6 +58,8 @@ macro_rules! wl_enum {
         }
     };
 }
+use std::fmt::Debug;
+
 pub(crate) use wl_enum;
 
 #[repr(u16)]
@@ -58,10 +67,15 @@ pub enum WLCallbackEvents {
     Done = 0,
 }
 
-#[derive(Debug)]
 pub struct WlStr {
     pub bytes: &'static [u8],
     pub str: &'static str,
+}
+
+impl Debug for WlStr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "WlStr({})", self.str)
+    }
 }
 
 macro_rules! wl_str_bytes {
@@ -86,3 +100,5 @@ macro_rules! wl_str_bytes {
     }};
 }
 pub(crate) use wl_str_bytes;
+
+use crate::wl;

@@ -4,3 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[profile.release]
+opt-level = 3        # Already the default, but ensures maximum speed optimization
+codegen-units = 1    # Allows LLVM to optimize across the entire crate for tighter, faster machine code, at the expense of slower compile times
+lto = "fat"          # Enables "fat" link-time optimizations, which lets the compiler perform whole-program analysis
+# panic = "abort"      # Changes panic handling to abort the process immediately, which removes overhead from unwinding the stack
+strip = "symbols"    # Strips symbols from the binary to reduce size (optional)

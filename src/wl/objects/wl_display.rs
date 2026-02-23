@@ -1,9 +1,9 @@
 use std::ptr;
 
-use crate::wl::{
+use crate::{unix_fd_stream::WLFdBuffer, wl::{
     objects::{MessageHeader, WLCallbackEvents, WLObject, wl_enum, wl_registry::WlRegistry},
     wl_buffered_stream::WLBufferedStream,
-};
+}};
 
 pub struct WlDisplay{
     callback_id: u32,
@@ -70,11 +70,10 @@ impl WlDisplay {
 
     pub fn dispatch_messages<F>(&mut self, stream: &mut WLBufferedStream, mut handler: F) -> std::io::Result<()>
     where
-        F: FnMut(&MessageHeader, &[u8], usize),
+        F: FnMut(&MessageHeader, &[u8], &mut WLFdBuffer, usize),
     {
-        while let Some((header, buffer, idx)) = stream.read_next_message()? {
+        while let Some((header, buffer, fds, idx)) = stream.read_next_message()? {
             if header.object_id == self.callback_id && header.opcode == WLCallbackEvents::Done as u16 {
-                // println!("Received callback done event, registry enumeration complete");
                 return Ok(());
             } else if let Some(display_event) = Self::parse_message(
                 &header,
@@ -100,7 +99,8 @@ impl WlDisplay {
 
             handler(
                 &header,
-                &buffer,
+                buffer,
+                fds,
                 idx,
             );
         }

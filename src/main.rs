@@ -1,13 +1,21 @@
 mod unix_fd_stream;
 mod wl;
 
+use core::str;
 use std::{
     env,
-    io::{self, Write},
+    io::{self, Read, Write, stdin},
+    process::exit,
+    thread::sleep,
+    time::Duration,
 };
 
 use crate::wl::{
-    objects::{wl_data_device::DataDeviceManagerExt, wl_display::WlDisplay},
+    debug_println,
+    objects::{
+        wl_data_managers::DataDeviceManagerExt, wl_data_source::WlDataControlSourceEvent,
+        wl_display::WlDisplay,
+    },
     wl_buffered_stream::WLBufferedStream,
 };
 
@@ -16,28 +24,29 @@ fn main() {
     let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR is not set");
 
     let socket_path = format!("{}/{}", xdg_runtime_dir, socket_name);
-    println!("Wayland socket path: {}", socket_path);
+    debug_println!("Wayland socket path: {}", socket_path);
 
     let mut stream =
         WLBufferedStream::connect(&socket_path).expect("Could not connect to unix socket");
-    println!("Successfully connected to the Wayland socket");
-
-    // _ = soc.send_message(WLMessage::new(WLObject::Display, WL_GET_REGISTRY_OPCODE));
+    debug_println!("Successfully connected to the Wayland socket");
 
     let mut display = WlDisplay::new();
+
+    let mut in_vec = Vec::new();
+    stdin().read_to_end(&mut in_vec).unwrap();
 
     let mut registry = display.get_registry(&mut stream).unwrap();
     display.roundtrip_sync(&mut stream).unwrap();
     display
-        .dispatch_messages(&mut stream, |header, buffer, offset| {
+        .dispatch_messages(&mut stream, |header, buffer, _, offset| {
             registry.add_interface(header, buffer, offset);
         })
         .unwrap();
 
-    println!("Got registry: {:?}", registry);
+    debug_println!("Got registry: {:?}", registry);
 
     if let Some(ext_data_control_manager) = registry.ext_data_control_manager.clone() {
-        println!(
+        debug_println!(
             "Found ExtDataControlManagerV1({}) with id {} and version {}",
             ext_data_control_manager.interface_name.str,
             ext_data_control_manager.global_name,
@@ -51,27 +60,82 @@ fn main() {
             .bind(&mut stream, registry.wl_seat.clone().unwrap())
             .unwrap();
 
-        mgr_local
-            .get_data_device(&mut stream, seat_local.local_id)
-            .unwrap();
+        let local_data_device = mgr_local.get_data_device(&mut stream, seat_local.local_id);
+        let mut data_source = mgr_local.create_data_source(&mut stream);
+        data_source.offer(&mut stream, "text/plain");
+        data_source.offer(&mut stream, "text/plain;charset=utf-8");
 
-        println!(
-            "Bound ExtDataControlManagerV1 to local id {}, and WlSeat to local id {}",
-            mgr_local.local_id, seat_local.local_id
+        local_data_device.set_selection(&mut stream, data_source.local_id);
+
+        debug_println!(
+            "Bound ExtDataControlManagerV1 to local id {}, and WlSeat to local id {} and got DataDevice with local id {}, data source with local id {}",
+            mgr_local.local_id,
+            seat_local.local_id,
+            local_data_device.local_id,
+            data_source.local_id
         );
+
+        let in_str = str::from_utf8(&in_vec).unwrap();
+        debug_println!("Read input data: {}", in_str);
 
         display.roundtrip_sync(&mut stream).unwrap();
         display
-            .dispatch_messages(&mut stream, |header, buffer, offset| {
-                println!(
-                    "Received message with header: {:?}, buffer length: {}, offset: {}",
-                    header,
-                    buffer.len(),
-                    offset
+            .dispatch_messages(&mut stream, |header, buffer, fds, offset| {
+                debug_println!(
+                    "Received message for object_id {} with opcode {}",
+                    header.object_id,
+                    header.opcode
                 );
+                if let Some(event) = data_source.parse_message(header, buffer, fds, offset) {
+                    match event {
+                        WlDataControlSourceEvent::Send { mime_type, fd } => {
+                            debug_println!(
+                                "Received send event with mime_type {} and fd {}",
+                                mime_type,
+                                fd
+                            );
+                            fds.fd_write_and_close(fd, in_str.as_bytes()).unwrap();
+                        }
+                        WlDataControlSourceEvent::Cancelled => {
+                            debug_println!("Received cancelled event. Exiting...");
+                            exit(0);
+                        }
+                    }
+                }
             })
             .unwrap();
-        // stream.get_data_device(mgr_local_id, seat_local_id).unwrap();
+
+        loop {
+            display
+                .dispatch_messages(&mut stream, |header, buffer, fds, offset| {
+                    debug_println!(
+                        "Received message for object_id {} with opcode {}",
+                        header.object_id,
+                        header.opcode
+                    );
+                    if let Some(event) = data_source.parse_message(header, buffer, fds, offset) {
+                        match event {
+                            WlDataControlSourceEvent::Send { mime_type, fd } => {
+                                debug_println!(
+                                    "Received send event with mime_type {} and fd {}",
+                                    mime_type,
+                                    fd
+                                );
+                                fds.fd_write_and_close(
+                                    fd,
+                                    str::from_utf8(&in_vec).unwrap().as_bytes(),
+                                )
+                                .unwrap();
+                            }
+                            WlDataControlSourceEvent::Cancelled => {
+                                debug_println!("Received cancelled event. Exiting...");
+                                exit(0);
+                            }
+                        }
+                    }
+                })
+                .unwrap();
+        }
     }
-    _ = io::stdout().flush();
+    // _ = io::stdout().flush();
 }
