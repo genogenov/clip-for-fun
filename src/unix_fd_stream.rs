@@ -1,6 +1,6 @@
 use std::{
     os::{
-        fd::{AsRawFd, RawFd},
+        fd::{IntoRawFd, RawFd},
         unix::net::UnixStream,
     },
     path::Path,
@@ -78,7 +78,7 @@ const fn cmsg_space(len: usize) -> usize {
 unsafe extern "C" {
     fn recvmsg(sockfd: RawFd, msg: *mut msghdr, flags: i32) -> isize;
     fn sendmsg(sockfd: RawFd, msg: *const msghdr, flags: i32) -> isize;
-    fn pipe2(fd: *mut RawFd, flags: i32) -> RawFd;
+    // fn pipe2(fd: *mut RawFd, flags: i32) -> RawFd;
     fn close(fd: RawFd) -> i32;
     fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
 }
@@ -87,7 +87,7 @@ pub struct WLFdBuffer {
     in_fds: [RawFd; FD_BUFFER_LEN],
     in_fd_count: usize,
     in_fds_cursor: usize,
-    out_fds: [RawFd; FD_BUFFER_LEN],
+    // out_fds: [RawFd; FD_BUFFER_LEN],
 }
 
 impl WLFdBuffer {
@@ -96,7 +96,7 @@ impl WLFdBuffer {
             in_fds: [0; FD_BUFFER_LEN],
             in_fd_count: 0,
             in_fds_cursor: 0,
-            out_fds: [0; FD_BUFFER_LEN],
+            // out_fds: [0; FD_BUFFER_LEN],
         }
     }
 
@@ -167,15 +167,14 @@ impl WLFdBuffer {
 }
 
 pub struct UnixFdStream {
-    stream: UnixStream,
     stream_fd: RawFd,
 }
 
 impl UnixFdStream {
     pub fn connect(path: &Path) -> std::io::Result<Self> {
         let stream = UnixStream::connect(path)?;
-        let stream_fd = stream.as_raw_fd();
-        Ok(Self { stream, stream_fd })
+        let stream_fd = stream.into_raw_fd();
+        Ok(Self { stream_fd })
     }
 
     pub fn read(
@@ -274,5 +273,11 @@ impl UnixFdStream {
 
             return Ok(total_bytes_sent as isize);
         }
+    }
+}
+
+impl Drop for UnixFdStream {
+    fn drop(&mut self) {
+        unsafe { close(self.stream_fd) };
     }
 }

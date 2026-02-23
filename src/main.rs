@@ -1,14 +1,11 @@
 mod unix_fd_stream;
 mod wl;
 
-use core::str;
 use std::{
     env,
-    io::{self, Read, Write, stdin},
+    io::{Read, stdin},
     path::PathBuf,
     process::exit,
-    thread::sleep,
-    time::Duration,
 };
 
 use crate::wl::{

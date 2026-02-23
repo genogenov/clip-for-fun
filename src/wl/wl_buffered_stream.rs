@@ -1,4 +1,4 @@
-use std::{os::fd::RawFd, path::Path, ptr};
+use std::path::Path;
 
 use crate::{
     unix_fd_stream::{UnixFdStream, WLFdBuffer},

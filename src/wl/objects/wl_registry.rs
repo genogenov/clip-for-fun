@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::{marker::PhantomData, ptr};
 
-use crate::unix_fd_stream::WLFdBuffer;
 use crate::wl::objects::wl_data_managers::{DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager, ZwlrDataControlManager, ZwlrDataControlManagerV1};
 use crate::wl::{
     objects::{MessageHeader, WLObject, WlStr, wl_enum, wl_str_bytes},
@@ -24,14 +23,14 @@ where
     I: WLObject,
 {
     pub local_id: u32,
-    pub interface: RegistryInterface<I>,
+    marker: PhantomData<I>,
 }
 
 impl<I: WLObject> BoundInterface<I>  {
-    pub fn new(local_id: u32, interface: RegistryInterface<I>) -> Self {
+    pub fn new(local_id: u32) -> Self {
         Self {
             local_id,
-            interface,
+            marker: PhantomData,
         }
     }
 }
@@ -124,7 +123,7 @@ impl WlRegistry {
         stream.pack_u32(interface.version);
         let binding_id = stream.pack_new_object_id();
         stream.end_message(bind_start);
-        Ok(BoundInterface::new(binding_id, interface))
+        Ok(BoundInterface::<I>::new(binding_id))
     }
 
     pub fn add_interface(

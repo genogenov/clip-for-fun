@@ -100,5 +100,3 @@ macro_rules! wl_str_bytes {
     }};
 }
 pub(crate) use wl_str_bytes;
-
-use crate::wl;
