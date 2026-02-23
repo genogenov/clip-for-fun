@@ -32,7 +32,7 @@ fn main() {
 
     let mut display = WlDisplay::new();
 
-    let mut in_vec = Vec::new();
+    let mut in_vec = Vec::with_capacity(1024);
     stdin().read_to_end(&mut in_vec).unwrap();
 
     let mut registry = display.get_registry(&mut stream).unwrap();
@@ -137,5 +137,4 @@ fn main() {
                 .unwrap();
         }
     }
-    // _ = io::stdout().flush();
 }
