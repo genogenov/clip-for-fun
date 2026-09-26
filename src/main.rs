@@ -30,19 +30,20 @@ fn main() {
     let mut display = WlDisplay::new();
 
     // Testing the paste functionality - read input to simulate copy for now.
-    let mut in_vec = Vec::with_capacity(1024);
-    let in_str: &[u8] = match env::args().nth(1) {
+    let in_str: Vec<u8> = match env::args().nth(1) {
         Some(first_arg) => {
             debug_println!("Using argument: {}", first_arg);
-            &first_arg.into_bytes()
+            first_arg.into_bytes()
         }
         None => {
-            debug_println!("Reading input from stdin");
+            debug_println!("Reading entire input from stdin");
+            let mut in_vec = Vec::new();
             stdin().read_to_end(&mut in_vec).unwrap();
-            in_vec.as_slice()
+            in_vec
         }
     };
-    
+    println!();
+    debug_println!("Input data length : {}", in_str.len());
     // Testing paste
 
     let mut registry = display.get_registry(&mut stream).unwrap();
@@ -107,7 +108,7 @@ fn main() {
                                 );
 
                                 // Testing paste - write the stdin input to the file descriptor
-                                fds.fd_write_and_close(fd, in_str).unwrap();
+                                fds.fd_write_and_close(fd, &in_str).unwrap();
                                 // Testing paste
                             }
                             WlDataControlSourceEvent::Cancelled => {
