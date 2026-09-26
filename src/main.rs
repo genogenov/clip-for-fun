@@ -107,7 +107,7 @@ fn main() {
                                 );
 
                                 // Serve to pasting client via fd it sent.
-                                fds.fd_write_and_close(fd, &in_str).unwrap();
+                                fd.fd_write_and_close(&in_str).unwrap();
                             }
                             WlDataControlSourceEvent::Cancelled => {
                                 debug_println!("Received cancelled event. Exiting...");

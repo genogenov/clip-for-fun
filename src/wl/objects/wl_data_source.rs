@@ -1,7 +1,7 @@
-use std::{os::fd::RawFd, ptr};
+use std::ptr;
 
 use crate::{
-    unix_fd_stream::WLFdBuffer,
+    unix_fd_stream::{WLFd, WLFdBuffer},
     wl::{
         objects::{MessageHeader, WLObject, wl_enum},
         wl_buffered_stream::WLBufferedStream,
@@ -30,7 +30,7 @@ wl_enum! {
 }
 
 pub enum WlDataControlSourceEvent {
-    Send { mime_type: String, fd: RawFd },
+    Send { mime_type: String, fd: WLFd },
     Cancelled,
 }
 
@@ -59,12 +59,13 @@ impl WlDataControlSource {
             if mime_type_end > buffer.len() {
                 return None; // Not enough data
             }
-            //let interface_length_name_slice = &buffer[idx..mime_type_end];
+            let interface_length_name_slice = &buffer[idx..mime_type_end];
 
             // alloc... think about a more performant way to do this without allocation, maybe preallocated str buffers.
-            //let mime_type: String = String::from_utf8_lossy(interface_length_name_slice).into_owned();
+            let mime_type: String =
+                unsafe { String::from_utf8_unchecked(interface_length_name_slice.to_vec()) };
             return Some(WlDataControlSourceEvent::Send {
-                mime_type: String::new(),
+                mime_type,
                 fd: fds.pop_last_in_fd().unwrap(),
             });
         } else if header.opcode == WlDataControlSourceEvents::Cancelled as u16 {
