@@ -70,6 +70,7 @@ pub enum WLCallbackEvents {
 pub struct WlStr {
     pub bytes: &'static [u8],
     pub str: &'static str,
+    pub wl_bytes: &'static [u8],
 }
 
 impl Debug for WlStr {
@@ -96,7 +97,7 @@ macro_rules! wl_str_bytes {
             }
             r
         };
-        WlStr { str: S, bytes: &RESULT }
+        WlStr { str: S, bytes: S.as_bytes(), wl_bytes: &RESULT }
     }};
 }
 pub(crate) use wl_str_bytes;

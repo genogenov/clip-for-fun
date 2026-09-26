@@ -1,7 +1,7 @@
 use std::{os::fd::OwnedFd, path::Path};
 
 pub type NextMessageResult<'a> =
-    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WLFdBuffer, usize)>>;
+    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WLFdBuffer)>>;
 
 use crate::{
     unix_fd_stream::{UnixFdStream, WLFdBuffer},
@@ -66,9 +66,8 @@ impl WLBufferedStream {
                     self.read_cursor += header.size as usize;
                     return Ok(Some((
                         header,
-                        &self.read_buffer,
+                        &self.read_buffer[message_body_offset..self.read_cursor],
                         &mut self.fd,
-                        message_body_offset,
                     )));
                 }
             }
@@ -157,12 +156,12 @@ impl WLBufferedStream {
     #[inline(always)]
     pub fn pack_wl_str(&mut self, s: &WlStr) {
         // the bytes in wl_str are already prefixed with the length, and there is null terminator at the end, so we can just copy them directly to the write buffer
-        let len = s.bytes.len() as u32;
+        let len = s.wl_bytes.len() as u32;
         self.write_buffer[self.write_cursor..self.write_cursor + len as usize]
-            .copy_from_slice(s.bytes);
+            .copy_from_slice(s.wl_bytes);
         self.write_cursor += len as usize;
         // we also need to ensure the string is 4 byte aligned by adding padding if necessary
-        let padding = (4 - (s.bytes.len() % 4)) % 4;
+        let padding = (4 - (s.wl_bytes.len() % 4)) % 4;
         self.write_buffer[self.write_cursor..self.write_cursor + padding].fill(0);
         self.write_cursor += padding;
     }
@@ -215,15 +214,12 @@ mod tests {
 
         rx.begin_read().unwrap();
         for (id, opcode) in [(3, 0), (4, 1)] {
-            let (header, buf, _, idx) = rx.read_next_message().unwrap().unwrap();
+            let (header, buf, _) = rx.read_next_message().unwrap().unwrap();
             assert_eq!(
                 (header.object_id, header.opcode, header.size),
                 (id, opcode, 12)
             );
-            assert_eq!(
-                u32::from_ne_bytes(buf[idx..idx + 4].try_into().unwrap()),
-                42
-            );
+            assert_eq!(u32::from_ne_bytes(buf[..4].try_into().unwrap()), 42);
         }
     }
 
@@ -242,7 +238,7 @@ mod tests {
         let payloads: [&[u8]; 2] = [b"first", b"second"];
         rx.begin_read().unwrap();
         for payload in payloads {
-            let (header, _, fds, _) = rx.read_next_message().unwrap().unwrap();
+            let (header, _, fds) = rx.read_next_message().unwrap().unwrap();
             // fd arguments add no bytes to the message
             assert_eq!(
                 (header.object_id, header.size),
@@ -328,7 +324,7 @@ mod tests {
         let mut stream = WLBufferedStream::connect(&path).unwrap();
         stream.begin_read().unwrap(); // gets only the 8 header bytes
         let got = stream.read_next_message().unwrap();
-        let ok = matches!(&got, Some((h, _, _, _)) if h.object_id == 5 && h.size == 12);
+        let ok = matches!(&got, Some((h, _, _)) if h.object_id == 5 && h.size == 12);
         t.join().unwrap();
         assert!(ok, "split message was not returned");
     }

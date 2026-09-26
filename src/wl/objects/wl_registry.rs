@@ -5,6 +5,7 @@ use crate::wl::objects::wl_data_managers::{
     DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager,
     ZwlrDataControlManager, ZwlrDataControlManagerV1,
 };
+use crate::wl::wl_message_reader::WlMessageReader;
 use crate::wl::{
     objects::{MessageHeader, WLObject, WlStr, wl_enum, wl_str_bytes},
     wl_buffered_stream::WLBufferedStream,
@@ -131,38 +132,15 @@ impl WlRegistry {
     pub fn add_interface(
         &mut self,
         header: &MessageHeader,
-        buffer: &[u8],
-        idx: usize,
+        reader: &mut WlMessageReader,
     ) -> Option<()> {
         if header.object_id == self.type_id && header.opcode == RegistryEvents::Global as u16 {
-            let global_name =
-                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx) as *const u32) };
-            let interface_name_len =
-                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx + 4) as *const u32) };
+            let global_name = reader.u32()?;
+            let interface_name_slice = reader.str()?;
+            let version = reader.u32()?;
 
-            let interface_name_end = idx + 8 + interface_name_len as usize;
-            if interface_name_end > buffer.len() {
-                return None; // Not enough data for interface name
-            }
-            let interface_length_name_slice = &buffer[idx + 4..interface_name_end];
-
-            #[inline(always)]
-            fn read_version(interface_name_len: u32, idx: usize, buffer: &[u8]) -> Option<u32> {
-                let padded_len = (interface_name_len as usize + 3) & !3;
-                let version_offset = idx + 8 + padded_len;
-                if version_offset + 4 > buffer.len() {
-                    return None;
-                }
-                unsafe {
-                    Some(ptr::read_unaligned(
-                        buffer.as_ptr().add(version_offset) as *const u32
-                    ))
-                }
-            }
-
-            match interface_length_name_slice {
+            match interface_name_slice {
                 val if val == WlRegistry::WL_DATA_DEVICE_MANAGER.bytes => {
-                    let version = read_version(interface_name_len, idx, buffer)?;
                     self.data_device_manager = Some(RegistryInterface::<WlDataDeviceManager> {
                         global_name,
                         version,
@@ -172,7 +150,6 @@ impl WlRegistry {
                     return Some(());
                 }
                 val if val == WlRegistry::ZWLR_DATA_CONTROL_MANAGER_V1.bytes => {
-                    let version = read_version(interface_name_len, idx, buffer)?;
                     self.zwlr_data_control_manager =
                         Some(RegistryInterface::<ZwlrDataControlManagerV1> {
                             global_name,
@@ -183,7 +160,6 @@ impl WlRegistry {
                     return Some(());
                 }
                 val if val == WlRegistry::EXT_DATA_CONTROL_MANAGER_V1.bytes => {
-                    let version = read_version(interface_name_len, idx, buffer)?;
                     self.ext_data_control_manager =
                         Some(RegistryInterface::<ExtDataControlManagerV1> {
                             global_name,
@@ -194,7 +170,6 @@ impl WlRegistry {
                     return Some(());
                 }
                 val if val == WlRegistry::WL_SEAT.bytes => {
-                    let version = read_version(interface_name_len, idx, buffer)?;
                     self.wl_seat = Some(RegistryInterface::<WlSeat> {
                         global_name,
                         version,

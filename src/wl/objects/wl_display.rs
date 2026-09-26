@@ -5,6 +5,7 @@ use crate::{
     wl::{
         objects::{MessageHeader, WLCallbackEvents, WLObject, wl_enum, wl_registry::WlRegistry},
         wl_buffered_stream::WLBufferedStream,
+        wl_message_reader::WlMessageReader,
     },
 };
 
@@ -19,30 +20,18 @@ impl WlDisplay {
         Self { callback_id: 0 }
     }
 
-    fn parse_message(header: &MessageHeader, buffer: &[u8], idx: usize) -> Option<DisplayEvent> {
+    fn parse_message(header: &MessageHeader, reader: &mut WlMessageReader) -> Option<DisplayEvent> {
         if header.object_id == Self::TYPE_ID && header.opcode == DisplayEvents::Error as u16 {
-            let target_object_id =
-                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx) as *const u32) };
-            let error_code =
-                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx + 4) as *const u32) };
+            let target_object_id = reader.u32()?;
+            let error_code = reader.u32()?;
 
-            // read error msg from buffer
-            let error_msg_len =
-                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx + 8) as *const u32) } as usize;
-            let error_msg_start = idx + 12;
-            let error_msg_end = error_msg_start + error_msg_len;
-            if error_msg_end > buffer.len() {
-                return None; // Not enough data for error message
-            }
-            let error_msg_slice = &buffer[error_msg_start..error_msg_end];
-            let error_msg = std::str::from_utf8(error_msg_slice)
-                .unwrap_or("<invalid utf-8>")
-                .to_string();
+            let error_msg_slice = reader.str()?;
+            let error_msg = String::from_utf8_lossy(error_msg_slice);
 
             return Some(DisplayEvent::Error {
                 target_object_id,
                 error_code,
-                error_msg,
+                error_msg: error_msg.into_owned(),
             });
         }
 
@@ -73,14 +62,16 @@ impl WlDisplay {
         mut handler: F,
     ) -> std::io::Result<()>
     where
-        F: FnMut(&MessageHeader, &[u8], &mut WLFdBuffer, usize),
+        F: FnMut(&MessageHeader, &mut WlMessageReader, &mut WLFdBuffer),
     {
-        while let Some((header, buffer, fds, idx)) = stream.read_next_message()? {
+        while let Some((header, buffer, fds)) = stream.read_next_message()? {
             if header.object_id == self.callback_id
                 && header.opcode == WLCallbackEvents::Done as u16
             {
                 return Ok(());
-            } else if let Some(display_event) = Self::parse_message(&header, buffer, idx) {
+            } else if let Some(display_event) =
+                Self::parse_message(&header, &mut WlMessageReader::new(buffer))
+            {
                 match display_event {
                     DisplayEvent::Error {
                         target_object_id,
@@ -95,7 +86,8 @@ impl WlDisplay {
                 }
             }
 
-            handler(&header, buffer, fds, idx);
+            let mut reader = WlMessageReader::new(buffer);
+            handler(&header, &mut reader, fds);
         }
 
         Ok(())

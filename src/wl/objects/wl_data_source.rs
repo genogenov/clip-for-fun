@@ -5,6 +5,7 @@ use crate::{
     wl::{
         objects::{MessageHeader, WLObject, wl_enum},
         wl_buffered_stream::WLBufferedStream,
+        wl_message_reader::WlMessageReader,
     },
 };
 
@@ -29,8 +30,8 @@ wl_enum! {
     }
 }
 
-pub enum WlDataControlSourceEvent {
-    Send { mime_type: String, fd: WLFd },
+pub enum WlDataControlSourceEvent<'a> {
+    Send { mime_type: &'a [u8], fd: WLFd },
     Cancelled,
 }
 
@@ -42,28 +43,18 @@ impl WlDataControlSource {
         stream.end_message(bind_start);
     }
 
-    pub fn parse_message(
+    pub fn parse_message<'a>(
         &mut self,
         header: &MessageHeader,
-        buffer: &[u8],
+        reader: &'a mut WlMessageReader,
         fds: &mut WLFdBuffer,
-        idx: usize,
-    ) -> Option<WlDataControlSourceEvent> {
+    ) -> Option<WlDataControlSourceEvent<'a>> {
         if header.object_id != self.local_id {
             return None;
         }
         if header.opcode == WlDataControlSourceEvents::Send as u16 {
-            let mime_type_len =
-                unsafe { ptr::read_unaligned(buffer.as_ptr().add(idx) as *const u32) };
-            let mime_type_end = idx + 4 + mime_type_len as usize;
-            if mime_type_end > buffer.len() {
-                return None; // Not enough data
-            }
-            let interface_length_name_slice = &buffer[idx..mime_type_end];
-
             // alloc... think about a more performant way to do this without allocation, maybe preallocated str buffers.
-            let mime_type: String =
-                unsafe { String::from_utf8_unchecked(interface_length_name_slice.to_vec()) };
+            let mime_type = reader.str()?;
             return Some(WlDataControlSourceEvent::Send {
                 mime_type,
                 fd: fds.pop_last_in_fd().unwrap(),

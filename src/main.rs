@@ -47,8 +47,8 @@ fn main() {
     let mut registry = display.get_registry(&mut stream).unwrap();
     display.roundtrip_sync(&mut stream).unwrap();
     display
-        .dispatch_messages(&mut stream, |header, buffer, _, offset| {
-            registry.add_interface(header, buffer, offset);
+        .dispatch_messages(&mut stream, |header, reader, _| {
+            registry.add_interface(header, reader);
         })
         .unwrap();
 
@@ -90,19 +90,19 @@ fn main() {
 
         loop {
             display
-                .dispatch_messages(&mut stream, |header, buffer, fds, offset| {
+                .dispatch_messages(&mut stream, |header, reader, fds| {
                     debug_println!(
                         "Received message for object_id {} with opcode {}",
                         header.object_id,
                         header.opcode
                     );
-                    if let Some(event) = data_source.parse_message(header, buffer, fds, offset) {
+                    if let Some(event) = data_source.parse_message(header, reader, fds) {
                         match event {
                             #[cfg_attr(not(debug_assertions), expect(unused_variables))]
                             WlDataControlSourceEvent::Send { mime_type, fd } => {
                                 debug_println!(
                                     "Received send event with mime_type {} and fd {}",
-                                    mime_type,
+                                    std::str::from_utf8(mime_type).unwrap(),
                                     fd
                                 );
 

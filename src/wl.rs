@@ -1,5 +1,6 @@
 pub mod objects;
 pub mod wl_buffered_stream;
+pub mod wl_message_reader;
 
 macro_rules! debug_println {
     ($($arg:tt)*) => {
