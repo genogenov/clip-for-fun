@@ -21,16 +21,18 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 - More tests
 
 ## Usage
-Needs a compositor that supports `ext_data_control_manager_v1`.
+Needs a compositor that supports `ext_data_control_manager_v1` (developed and tested on Hyprland).
 
 ```sh
-cargo build --release # optionally without release to dispaly the debug output, adjust the path to the binary as needed in the command below
+cargo build --release
 
-#Run with arg
+# copy an argument
 ./target/release/clip-for-fun "hello world"
-# OR pipe content
+
+# or copy piped input
 cat file.txt | ./target/release/clip-for-fun
 ```
-Then paste in some text input.
-The process stays alive until something else is copied, since on Wayland the owner of the clipboard has to serve the data itself.
 
+Then paste anywhere. The process stays alive until something else is copied, since on Wayland the owner of the clipboard has to serve the data itself.
+
+For debug output, build without `--release` and run `./target/debug/clip-for-fun` instead.
