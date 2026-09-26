@@ -29,7 +29,7 @@ fn main() {
 
     let mut display = WlDisplay::new();
 
-    // Testing the paste functionality - read input to simulate copy for now.
+    // Data to put on the clipboard: first argument if given, otherwise all of stdin.
     let in_str: Vec<u8> = match env::args().nth(1) {
         Some(first_arg) => {
             debug_println!("Using argument: {}", first_arg);
@@ -43,7 +43,6 @@ fn main() {
         }
     };
     debug_println!("Input data length : {}", in_str.len());
-    // Testing paste
 
     let mut registry = display.get_registry(&mut stream).unwrap();
     display.roundtrip_sync(&mut stream).unwrap();
@@ -99,6 +98,7 @@ fn main() {
                     );
                     if let Some(event) = data_source.parse_message(header, buffer, fds, offset) {
                         match event {
+                            #[cfg_attr(not(debug_assertions), expect(unused_variables))]
                             WlDataControlSourceEvent::Send { mime_type, fd } => {
                                 debug_println!(
                                     "Received send event with mime_type {} and fd {}",
@@ -106,9 +106,8 @@ fn main() {
                                     fd
                                 );
 
-                                // Testing paste - write the stdin input to the file descriptor
+                                // Serve to pasting client via fd it sent.
                                 fds.fd_write_and_close(fd, &in_str).unwrap();
-                                // Testing paste
                             }
                             WlDataControlSourceEvent::Cancelled => {
                                 debug_println!("Received cancelled event. Exiting...");

@@ -18,16 +18,19 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 - Run in the background after copying, like `wl-copy`
 - CLI flags (`--paste`, `--type`, `--primary`)
 - Proper error handling instead of `unwrap()`
-- Tests
+- More tests
 
 ## Usage
 Needs a compositor that supports `ext_data_control_manager_v1`.
 
 ```sh
-cargo build --release
+cargo build --release # optionally without release to dispaly the debug output, adjust the path to the binary as needed in the command below
+
+#Run with arg
 ./target/release/clip-for-fun "hello world"
+# OR pipe content
 cat file.txt | ./target/release/clip-for-fun
 ```
-
+Then paste in some text input.
 The process stays alive until something else is copied, since on Wayland the owner of the clipboard has to serve the data itself.
 
