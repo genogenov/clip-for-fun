@@ -114,8 +114,7 @@ impl WLFdBuffer {
     fn push_in_fds(&mut self, fds: &[RawFd]) -> std::io::Result<()> {
         // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
         if fds.len() > self.in_fds.len() - self.in_fd_count {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 "Not enough space in buffer for file descriptors",
             ));
         }
@@ -219,8 +218,7 @@ impl UnixFdStream {
             while ctrl_buf_cursor < msg.msg_controllen {
                 let cmsg = unsafe { &mut *(msg.msg_control.add(ctrl_buf_cursor) as *mut cmsghdr) };
                 if cmsg.cmsg_len == 0 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(std::io::Error::other(
                         "Invalid control message with zero length",
                     ));
                 }

@@ -1,4 +1,7 @@
-use crate::wl::{objects::{WLObject, wl_enum}, wl_buffered_stream::WLBufferedStream};
+use crate::wl::{
+    objects::{WLObject, wl_enum},
+    wl_buffered_stream::WLBufferedStream,
+};
 
 pub struct WlDataControlDevice {
     pub local_id: u32,
@@ -55,7 +58,10 @@ impl WlDataControlDevice {
     // }
 
     pub fn set_selection(&self, stream: &mut WLBufferedStream, source_id: u32) {
-        let start = stream.begin_message::<WlDataControlDevice>(WlDataControlDeviceOps::SetSelection, self.local_id);
+        let start = stream.begin_message::<WlDataControlDevice>(
+            WlDataControlDeviceOps::SetSelection,
+            self.local_id,
+        );
         stream.pack_u32(source_id);
         stream.end_message(start);
     }

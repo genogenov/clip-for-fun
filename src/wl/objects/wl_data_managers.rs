@@ -1,13 +1,18 @@
-use crate::wl::{objects::{NoEvents, WLObject, wl_data_control_device::WlDataControlDevice, wl_data_source::WlDataControlSource, wl_enum, wl_registry::{BoundInterface, RegistryInterface}}, wl_buffered_stream::WLBufferedStream};
+use crate::wl::{
+    objects::{
+        NoEvents, WLObject,
+        wl_data_control_device::WlDataControlDevice,
+        wl_data_source::WlDataControlSource,
+        wl_enum,
+        wl_registry::{BoundInterface, RegistryInterface},
+    },
+    wl_buffered_stream::WLBufferedStream,
+};
 
 pub trait DataDeviceManagerExt {
     fn manager_id(&self) -> u32;
 
-    fn get_data_device(
-        &self,
-        stream: &mut WLBufferedStream,
-        seat_id: u32,
-    ) -> WlDataControlDevice {
+    fn get_data_device(&self, stream: &mut WLBufferedStream, seat_id: u32) -> WlDataControlDevice {
         let data_device_start = stream.begin_message::<WlDataDeviceManager>(
             WlDataDeviceManagerOps::GetDataDevice,
             self.manager_id(),
@@ -16,7 +21,9 @@ pub trait DataDeviceManagerExt {
         stream.pack_u32(seat_id);
         stream.end_message(data_device_start);
 
-        WlDataControlDevice { local_id: data_device_id }
+        WlDataControlDevice {
+            local_id: data_device_id,
+        }
     }
 
     fn create_data_source(&self, stream: &mut WLBufferedStream) -> WlDataControlSource {
@@ -27,7 +34,9 @@ pub trait DataDeviceManagerExt {
         let data_source_id = stream.pack_new_object_id();
         stream.end_message(data_source_start);
 
-        WlDataControlSource { local_id: data_source_id }
+        WlDataControlSource {
+            local_id: data_source_id,
+        }
     }
 }
 
@@ -86,7 +95,6 @@ pub enum WlDataDeviceManagerEvents {
 pub type DataControlManager = RegistryInterface<ExtDataControlManagerV1>;
 pub type ZwlrDataControlManager = RegistryInterface<ZwlrDataControlManagerV1>;
 pub type DataDeviceManager = RegistryInterface<WlDataDeviceManager>;
-
 
 impl DataDeviceManagerExt for BoundInterface<ZwlrDataControlManagerV1> {
     fn manager_id(&self) -> u32 {

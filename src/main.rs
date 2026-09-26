@@ -29,9 +29,21 @@ fn main() {
 
     let mut display = WlDisplay::new();
 
+    // Testing the paste functionality - read input to simulate copy for now.
     let mut in_vec = Vec::with_capacity(1024);
-    stdin().read_to_end(&mut in_vec).unwrap();
-    let in_str = String::from_utf8_lossy(&in_vec);
+    let in_str: &[u8] = match env::args().nth(1) {
+        Some(first_arg) => {
+            debug_println!("Using argument: {}", first_arg);
+            &first_arg.into_bytes()
+        }
+        None => {
+            debug_println!("Reading input from stdin");
+            stdin().read_to_end(&mut in_vec).unwrap();
+            in_vec.as_slice()
+        }
+    };
+    
+    // Testing paste
 
     let mut registry = display.get_registry(&mut stream).unwrap();
     display.roundtrip_sync(&mut stream).unwrap();
@@ -76,31 +88,6 @@ fn main() {
         debug_println!("Read input data: {:?}", in_str);
 
         display.roundtrip_sync(&mut stream).unwrap();
-        display
-            .dispatch_messages(&mut stream, |header, buffer, fds, offset| {
-                debug_println!(
-                    "Received message for object_id {} with opcode {}",
-                    header.object_id,
-                    header.opcode
-                );
-                if let Some(event) = data_source.parse_message(header, buffer, fds, offset) {
-                    match event {
-                        WlDataControlSourceEvent::Send { mime_type, fd } => {
-                            debug_println!(
-                                "Received send event with mime_type {} and fd {}",
-                                mime_type,
-                                fd
-                            );
-                            fds.fd_write_and_close(fd, in_str.as_bytes()).unwrap();
-                        }
-                        WlDataControlSourceEvent::Cancelled => {
-                            debug_println!("Received cancelled event. Exiting...");
-                            exit(0);
-                        }
-                    }
-                }
-            })
-            .unwrap();
 
         loop {
             display
@@ -118,7 +105,10 @@ fn main() {
                                     mime_type,
                                     fd
                                 );
-                                fds.fd_write_and_close(fd, in_str.as_bytes()).unwrap();
+
+                                // Testing paste - write the stdin input to the file descriptor
+                                fds.fd_write_and_close(fd, in_str).unwrap();
+                                // Testing paste
                             }
                             WlDataControlSourceEvent::Cancelled => {
                                 debug_println!("Received cancelled event. Exiting...");

@@ -1,6 +1,12 @@
 use std::{os::fd::RawFd, ptr};
 
-use crate::{unix_fd_stream::WLFdBuffer, wl::{objects::{MessageHeader, WLObject, wl_enum}, wl_buffered_stream::WLBufferedStream}};
+use crate::{
+    unix_fd_stream::WLFdBuffer,
+    wl::{
+        objects::{MessageHeader, WLObject, wl_enum},
+        wl_buffered_stream::WLBufferedStream,
+    },
+};
 
 pub struct WlDataControlSource {
     pub local_id: u32,
@@ -30,7 +36,8 @@ pub enum WlDataControlSourceEvent {
 
 impl WlDataControlSource {
     pub fn offer(&self, stream: &mut WLBufferedStream, mime_type: &str) {
-        let bind_start = stream.begin_message::<WlDataControlSource>(WlDataControlSourceOps::Offer, self.local_id);
+        let bind_start = stream
+            .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Offer, self.local_id);
         stream.pack_str(mime_type);
         stream.end_message(bind_start);
     }
@@ -56,7 +63,10 @@ impl WlDataControlSource {
 
             // alloc... think about a more performant way to do this without allocation, maybe preallocated str buffers.
             //let mime_type: String = String::from_utf8_lossy(interface_length_name_slice).into_owned();
-            return Some(WlDataControlSourceEvent::Send { mime_type: String::new(), fd: fds.pop_last_in_fd().unwrap() });
+            return Some(WlDataControlSourceEvent::Send {
+                mime_type: String::new(),
+                fd: fds.pop_last_in_fd().unwrap(),
+            });
         } else if header.opcode == WlDataControlSourceEvents::Cancelled as u16 {
             return Some(WlDataControlSourceEvent::Cancelled);
         }

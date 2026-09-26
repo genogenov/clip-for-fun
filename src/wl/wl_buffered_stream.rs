@@ -1,5 +1,7 @@
 use std::path::Path;
 
+pub type NextMessageResult<'a> = std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WLFdBuffer, usize)>>;
+
 use crate::{
     unix_fd_stream::{UnixFdStream, WLFdBuffer},
     wl::objects::{MessageHeader, WLObject, WlStr},
@@ -20,7 +22,7 @@ impl WLBufferedStream {
     pub fn connect(socket_path: &Path) -> std::io::Result<Self> {
         let stream = UnixFdStream::connect(socket_path)?;
         Ok(Self {
-            stream: stream,
+            stream,
             write_buffer: [0u8; 1024],
             write_cursor: 0,
             read_buffer: [0u8; 4096],
@@ -38,16 +40,18 @@ impl WLBufferedStream {
         Ok(())
     }
 
-    pub fn read_next_message(&mut self) -> std::io::Result<Option<(MessageHeader, &[u8], &mut WLFdBuffer, usize)>> {
+    pub fn read_next_message(
+        &mut self,
+    ) -> NextMessageResult<'_> {
         while self.bytes_read > 0 {
-            while (self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize) <= self.bytes_read {
-                let header: MessageHeader = MessageHeader::parse(&self.read_buffer, self.read_cursor);
+            if (self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize) <= self.bytes_read {
+                let header: MessageHeader =
+                    MessageHeader::parse(&self.read_buffer, self.read_cursor);
 
                 if header.size > self.read_buffer.len() as u16
                     || header.size < MessageHeader::WL_HEADER_SIZE
                 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(std::io::Error::other(
                         format!("Message size {} invalid", header.size),
                     ));
                 }
@@ -57,7 +61,12 @@ impl WLBufferedStream {
 
                 let message_body_offset = self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize;
                 self.read_cursor += header.size as usize;
-                return Ok(Some((header, &self.read_buffer, &mut self.fd, message_body_offset)));
+                return Ok(Some((
+                    header,
+                    &self.read_buffer,
+                    &mut self.fd,
+                    message_body_offset,
+                )));
             }
 
             // we may have read a partial message, so we need to move the remaining bytes to the beginning of the buffer
@@ -68,7 +77,9 @@ impl WLBufferedStream {
                     .copy_within(self.read_cursor..self.bytes_read, 0);
             }
 
-            let new_bytes_read = self.stream.read(&mut self.read_buffer[remaining_bytes..], &mut self.fd)?;
+            let new_bytes_read = self
+                .stream
+                .read(&mut self.read_buffer[remaining_bytes..], &mut self.fd)?;
             if new_bytes_read == 0 {
                 // EOF reached, no more messages to read.. if we have remaining bytes it means we have a partial message that we cant parse.
                 if remaining_bytes > 0 {

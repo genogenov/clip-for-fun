@@ -1,7 +1,10 @@
 use std::fmt::Debug;
 use std::{marker::PhantomData, ptr};
 
-use crate::wl::objects::wl_data_managers::{DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager, ZwlrDataControlManager, ZwlrDataControlManagerV1};
+use crate::wl::objects::wl_data_managers::{
+    DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager,
+    ZwlrDataControlManager, ZwlrDataControlManagerV1,
+};
 use crate::wl::{
     objects::{MessageHeader, WLObject, WlStr, wl_enum, wl_str_bytes},
     wl_buffered_stream::WLBufferedStream,
@@ -26,7 +29,7 @@ where
     marker: PhantomData<I>,
 }
 
-impl<I: WLObject> BoundInterface<I>  {
+impl<I: WLObject> BoundInterface<I> {
     pub fn new(local_id: u32) -> Self {
         Self {
             local_id,
@@ -54,7 +57,6 @@ wl_enum! {
         Release = 3,
     }
 }
-
 
 // #[repr(u8)]
 // pub enum WLSeatCapability {

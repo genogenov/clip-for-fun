@@ -1,5 +1,5 @@
-pub mod wl_buffered_stream;
 pub mod objects;
+pub mod wl_buffered_stream;
 
 macro_rules! debug_println {
     ($($arg:tt)*) => {
@@ -11,4 +11,4 @@ macro_rules! debug_println {
     };
 }
 
-pub (crate) use debug_println;
+pub(crate) use debug_println;
