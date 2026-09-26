@@ -102,7 +102,7 @@ fn main() {
                             WlDataControlSourceEvent::Send { mime_type, fd } => {
                                 debug_println!(
                                     "Received send event with mime_type {} and fd {}",
-                                    std::str::from_utf8(mime_type).unwrap(),
+                                    str::from_utf8(mime_type).unwrap(),
                                     fd
                                 );
 
