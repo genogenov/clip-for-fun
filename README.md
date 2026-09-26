@@ -10,6 +10,7 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 - Wayland wire format (headers, ints, strings, new_id)
 - Registry + binding `wl_seat` and `ext_data_control_manager_v1`
 - Receiving fds over the socket (`SCM_RIGHTS`)
+- Reassembling messages split across socket reads
 
 ## Todo
 - Paste mode (like `wl-paste`)

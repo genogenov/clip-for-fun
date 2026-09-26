@@ -1,6 +1,7 @@
 use std::path::Path;
 
-pub type NextMessageResult<'a> = std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WLFdBuffer, usize)>>;
+pub type NextMessageResult<'a> =
+    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WLFdBuffer, usize)>>;
 
 use crate::{
     unix_fd_stream::{UnixFdStream, WLFdBuffer},
@@ -40,9 +41,7 @@ impl WLBufferedStream {
         Ok(())
     }
 
-    pub fn read_next_message(
-        &mut self,
-    ) -> NextMessageResult<'_> {
+    pub fn read_next_message(&mut self) -> NextMessageResult<'_> {
         while self.bytes_read > 0 {
             if (self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize) <= self.bytes_read {
                 let header: MessageHeader =
@@ -51,22 +50,24 @@ impl WLBufferedStream {
                 if header.size > self.read_buffer.len() as u16
                     || header.size < MessageHeader::WL_HEADER_SIZE
                 {
-                    return Err(std::io::Error::other(
-                        format!("Message size {} invalid", header.size),
-                    ));
+                    return Err(std::io::Error::other(format!(
+                        "Message size {} invalid",
+                        header.size
+                    )));
                 }
-                if header.size as usize + self.read_cursor > self.bytes_read {
-                    break;
+                // Only return the message once all of it is in the buffer; otherwise fall
+                // through and read more bytes from the socket.
+                if self.read_cursor + header.size as usize <= self.bytes_read {
+                    let message_body_offset =
+                        self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize;
+                    self.read_cursor += header.size as usize;
+                    return Ok(Some((
+                        header,
+                        &self.read_buffer,
+                        &mut self.fd,
+                        message_body_offset,
+                    )));
                 }
-
-                let message_body_offset = self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize;
-                self.read_cursor += header.size as usize;
-                return Ok(Some((
-                    header,
-                    &self.read_buffer,
-                    &mut self.fd,
-                    message_body_offset,
-                )));
             }
 
             // we may have read a partial message, so we need to move the remaining bytes to the beginning of the buffer
@@ -166,5 +167,38 @@ impl WLBufferedStream {
         let padding = ((4 - (len % 4)) % 4) as usize;
         self.write_buffer[self.write_cursor..self.write_cursor + padding].fill(0);
         self.write_cursor += padding;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn message_split_across_two_reads_is_returned() {
+        let path = std::env::temp_dir().join(format!("cff-test-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        let t = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            // 12-byte message: object_id=5, opcode=0, size=12, body u32=42
+            let mut msg = Vec::new();
+            msg.extend_from_slice(&5u32.to_ne_bytes());
+            msg.extend_from_slice(&0u16.to_ne_bytes());
+            msg.extend_from_slice(&12u16.to_ne_bytes());
+            msg.extend_from_slice(&42u32.to_ne_bytes());
+            s.write_all(&msg[..8]).unwrap(); // header only
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            s.write_all(&msg[8..]).unwrap(); // body arrives later
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        });
+        let mut stream = WLBufferedStream::connect(&path).unwrap();
+        stream.begin_read().unwrap(); // gets only the 8 header bytes
+        let got = stream.read_next_message().unwrap();
+        let ok = matches!(&got, Some((h, _, _, _)) if h.object_id == 5 && h.size == 12);
+        t.join().unwrap();
+        assert!(ok, "split message was not returned");
     }
 }

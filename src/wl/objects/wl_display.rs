@@ -87,12 +87,10 @@ impl WlDisplay {
                         error_code,
                         error_msg,
                     } => {
-                        return Err(std::io::Error::other(
-                            format!(
-                                "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
-                                target_object_id, error_code, error_msg
-                            ),
-                        ));
+                        return Err(std::io::Error::other(format!(
+                            "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
+                            target_object_id, error_code, error_msg
+                        )));
                     }
                 }
             }

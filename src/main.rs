@@ -42,7 +42,6 @@ fn main() {
             in_vec
         }
     };
-    println!();
     debug_println!("Input data length : {}", in_str.len());
     // Testing paste
 
@@ -120,5 +119,8 @@ fn main() {
                 })
                 .unwrap();
         }
+    } else {
+        eprintln!("error: this compositor does not support ext_data_control_manager_v1");
+        exit(1);
     }
 }
