@@ -26,7 +26,7 @@ impl WLBufferedStream {
         Ok(Self::new(UnixFdStream::connect(socket_path)?))
     }
 
-    fn new(stream: UnixFdStream) -> Self {
+    pub(crate) fn new(stream: UnixFdStream) -> Self {
         Self {
             stream,
             write_buffer: [0u8; 1024],

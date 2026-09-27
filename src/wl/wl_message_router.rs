@@ -1,14 +1,20 @@
 use crate::wl::{
-    debug_println, objects::{
+    debug_println,
+    objects::{
         MessageHeader, WLCallbackEvents,
+        wl_data_control_device::{DataControlDeviceEvent, WlDataControlDevice},
+        wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
         wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
         wl_display::{DisplayEvent, WlDisplay},
-    }, wl_buffered_stream::WLBufferedStream,
+    },
+    wl_buffered_stream::WLBufferedStream,
 };
 use std::{
     io::{Error, ErrorKind, Result},
     ops::ControlFlow,
 };
+
+const SERVER_ID_START: u32 = 0xff000000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WlInterface {
@@ -33,6 +39,14 @@ pub enum Slot {
 
 pub enum WLEvent<'a> {
     DataControlSource(WlDataControlSourceEvent<'a>),
+
+    DataControlDevice(DataControlDeviceEvent),
+
+    DataControlOffer {
+        id: u32,
+        event: DataControlOfferEvent<'a>,
+    },
+
     Registry(MessageHeader, &'a [u8]),
 
     SyncDone,
@@ -61,10 +75,28 @@ impl WlMessageRouter {
     pub fn register(&mut self, interface: WlInterface) -> Result<u32> {
         if let Some(free_index) = self.find_free_client() {
             self.client_interfaces[free_index] = Slot::Live(interface);
-            debug_println!("Registered interface {:?} at client slot {}", interface, free_index);
+            debug_println!(
+                "Registered interface {:?} at client slot {}",
+                interface,
+                free_index
+            );
             Ok(free_index as u32)
         } else {
             Err(Error::other("No free client slot available"))
+        }
+    }
+
+    pub fn register_server(&mut self, interface: WlInterface, id: u32) -> Result<u32> {
+        if let Some(slot) = self.server_interfaces.get_mut(
+            id.checked_sub(SERVER_ID_START)
+                .ok_or_else(|| Error::other(format!("Invalid server slot id {}", id)))?
+                as usize,
+        ) {
+            *slot = Slot::Live(interface);
+            debug_println!("Registered interface {:?} at server slot {}", interface, id);
+            Ok(id)
+        } else {
+            Err(Error::other(format!("Invalid server slot id {}", id)))
         }
     }
 
@@ -117,14 +149,43 @@ impl WlMessageRouter {
                 WlInterface::ExtDataControlManager => Ok(Some(WLEvent::Ignored)),
                 WlInterface::ZwlrDataControlManager => Ok(Some(WLEvent::Ignored)),
                 WlInterface::DataDeviceManager => Ok(Some(WLEvent::Ignored)),
-                WlInterface::DataControlDevice => Ok(Some(WLEvent::Ignored)),
+                WlInterface::DataControlDevice => {
+                    let data_control_device_event =
+                        WlDataControlDevice::parse_message(header.opcode, buffer, fds)?;
+                    match data_control_device_event {
+                        DataControlDeviceEvent::DataOffer { new_id } => {
+                            self.register_server(WlInterface::DataControlOffer, new_id)?;
+                        }
+                        _ => {}
+                    }
+                    Ok(Some(WLEvent::DataControlDevice(data_control_device_event)))
+                }
                 WlInterface::DataControlSource => Ok(Some(WLEvent::DataControlSource(
                     WlDataControlSource::parse_message(header.opcode, buffer, fds)?,
                 ))),
-                WlInterface::DataControlOffer => Ok(Some(WLEvent::Ignored)),
+                WlInterface::DataControlOffer => {
+                    let data_control_offer_event =
+                        WlDataControlOffer::parse_message(header.opcode, buffer, fds)?;
+                    Ok(Some(WLEvent::DataControlOffer {
+                        id: header.object_id,
+                        event: data_control_offer_event,
+                    }))
+                }
                 WlInterface::Registry => Ok(Some(WLEvent::Registry(header, buffer))),
             }
         }
+    }
+
+    pub fn free_server(&mut self, object_id: u32) -> Result<()> {
+        if let Some(slot) = self.server_interfaces.get_mut(
+            object_id
+                .checked_sub(SERVER_ID_START)
+                .ok_or_else(|| Error::other(format!("Invalid server slot id {}", object_id)))?
+                as usize,
+        ) {
+            *slot = Slot::Free;
+        }
+        Ok(())
     }
 
     pub fn dispatch_messages<F: FnMut(WLEvent<'_>) -> ControlFlow<()>>(
@@ -151,7 +212,6 @@ impl WlMessageRouter {
     }
 
     fn lookup_slot(&self, object_id: u32) -> Option<WlInterface> {
-        const SERVER_ID_START: u32 = 0xff000000;
         let slot = if object_id >= SERVER_ID_START {
             self.server_interfaces
                 .get((object_id - SERVER_ID_START) as usize)
@@ -164,5 +224,260 @@ impl WlMessageRouter {
             Some(Slot::Reserved) => None,
             None => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wl::{
+        objects::{
+            wl_data_control_device::WlDataControlDeviceEvents,
+            wl_data_offer::{WlDataControlOfferEvents, WlDataControlOfferOps},
+            wl_display::DisplayEvents,
+        },
+        wl_message_reader::WlMessageReader,
+    };
+    use std::{
+        io::{Read, Write},
+        os::unix::net::UnixStream,
+        time::Duration,
+    };
+
+    fn msg(object_id: u32, opcode: u16, body: &[u8]) -> Vec<u8> {
+        let mut m = Vec::with_capacity(8 + body.len());
+        m.extend_from_slice(&object_id.to_ne_bytes());
+        m.extend_from_slice(&opcode.to_ne_bytes());
+        m.extend_from_slice(&((8 + body.len()) as u16).to_ne_bytes());
+        m.extend_from_slice(body);
+        m
+    }
+
+    fn wl_str(s: &str) -> Vec<u8> {
+        let mut out = ((s.len() + 1) as u32).to_ne_bytes().to_vec();
+        out.extend_from_slice(s.as_bytes());
+        out.push(0);
+        out.resize(out.len().next_multiple_of(4), 0);
+        out
+    }
+
+    // The peer end plays the compositor.
+    fn setup() -> (WlMessageRouter, WLBufferedStream, UnixStream) {
+        let (a, peer) = UnixStream::pair().unwrap();
+        (
+            WlMessageRouter::new(),
+            WLBufferedStream::new(a.into()),
+            peer,
+        )
+    }
+
+    #[test]
+    fn ids_are_dense_and_reused_after_delete_id() {
+        let (mut router, mut stream, mut peer) = setup();
+        assert_eq!(router.register(WlInterface::Registry).unwrap(), 2);
+        assert_eq!(router.register(WlInterface::Callback).unwrap(), 3);
+        assert_eq!(router.register(WlInterface::Seat).unwrap(), 4);
+
+        peer.write_all(&msg(
+            WlDisplay::TYPE_ID,
+            DisplayEvents::DeleteId.into(),
+            &3u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WLEvent::Ignored)
+        ));
+        assert_eq!(router.register(WlInterface::DataControlSource).unwrap(), 3);
+    }
+
+    #[test]
+    fn data_offer_registers_the_offer_and_its_events_carry_its_id() {
+        let (mut router, mut stream, mut peer) = setup();
+        let device = router.register(WlInterface::DataControlDevice).unwrap();
+        let offer: u32 = 0xff00_0000;
+
+        let mut bytes = msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &offer.to_ne_bytes(),
+        );
+        bytes.extend(msg(
+            offer,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/plain"),
+        ));
+        bytes.extend(msg(
+            device,
+            WlDataControlDeviceEvents::Selection.into(),
+            &offer.to_ne_bytes(),
+        ));
+        bytes.extend(msg(
+            device,
+            WlDataControlDeviceEvents::PrimarySelection.into(),
+            &0u32.to_ne_bytes(),
+        ));
+        peer.write_all(&bytes).unwrap();
+
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WLEvent::DataControlDevice(DataControlDeviceEvent::DataOffer { new_id })) if new_id == offer
+        ));
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WLEvent::DataControlOffer { id, event: DataControlOfferEvent::Offer { mime } })
+                if id == offer && mime == b"text/plain"
+        ));
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WLEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id: Some(id) })) if id == offer
+        ));
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WLEvent::DataControlDevice(
+                DataControlDeviceEvent::PrimarySelection { offer_id: None }
+            ))
+        ));
+    }
+
+    #[test]
+    fn unknown_server_object_is_ignored_but_unknown_client_object_is_an_error() {
+        let (mut router, mut stream, mut peer) = setup();
+        peer.write_all(&msg(0xff00_0005, 0, &wl_str("text/plain")))
+            .unwrap();
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WLEvent::Ignored)
+        ));
+
+        peer.write_all(&msg(9, 0, &[])).unwrap();
+        assert!(router.next_event(&mut stream).is_err());
+    }
+
+    #[test]
+    fn malformed_or_unknown_events_are_errors() {
+        let (mut router, mut stream, mut peer) = setup();
+        let device = router.register(WlInterface::DataControlDevice).unwrap();
+
+        peer.write_all(&msg(device, 9, &[])).unwrap();
+        assert!(router.next_event(&mut stream).is_err(), "unknown opcode");
+
+        peer.write_all(&msg(
+            device,
+            WlDataControlDeviceEvents::Selection.into(),
+            &[],
+        ))
+        .unwrap();
+        assert!(router.next_event(&mut stream).is_err(), "missing argument");
+
+        peer.write_all(&msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &5u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        assert!(
+            router.next_event(&mut stream).is_err(),
+            "new_id outside server range"
+        );
+    }
+
+    #[test]
+    fn callback_done_is_sync_done_and_display_error_is_an_error() {
+        let (mut router, mut stream, mut peer) = setup();
+        let callback = router.register(WlInterface::Callback).unwrap();
+        peer.write_all(&msg(
+            callback,
+            WLCallbackEvents::Done as u16,
+            &7u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WLEvent::SyncDone)
+        ));
+
+        let mut body = 2u32.to_ne_bytes().to_vec();
+        body.extend(1u32.to_ne_bytes());
+        body.extend(wl_str("invalid arguments"));
+        peer.write_all(&msg(WlDisplay::TYPE_ID, DisplayEvents::Error.into(), &body))
+            .unwrap();
+        let Err(err) = router.next_event(&mut stream) else {
+            panic!("display error was not reported");
+        };
+        assert!(err.to_string().contains("invalid arguments"));
+    }
+
+    #[test]
+    fn dispatch_stops_on_break_and_reports_unexpected_eof() {
+        let (mut router, mut stream, mut peer) = setup();
+        let callback = router.register(WlInterface::Callback).unwrap();
+        peer.write_all(&msg(
+            callback,
+            WLCallbackEvents::Done as u16,
+            &0u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        drop(peer);
+
+        router
+            .dispatch_messages(&mut stream, |event| {
+                if matches!(event, WLEvent::SyncDone) {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .unwrap();
+        let err = router
+            .dispatch_messages(&mut stream, |_| ControlFlow::Continue(()))
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn receive_sends_mime_with_fd_and_destroy_frees_the_offer() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let mut client = WLBufferedStream::new(a.into());
+        let mut compositor = WLBufferedStream::new(b.into());
+        let mut router = WlMessageRouter::new();
+        let offer_id: u32 = 0xff00_0000;
+        router
+            .register_server(WlInterface::DataControlOffer, offer_id)
+            .unwrap();
+
+        let (mut payload_rx, payload_tx) = UnixStream::pair().unwrap();
+        let offer = WlDataControlOffer::new(offer_id);
+        offer
+            .receive(&mut client, "text/plain", payload_tx.into())
+            .unwrap();
+        offer.destroy(&mut client, &mut router).unwrap();
+        client.write().unwrap();
+
+        let (header, body, fds) = compositor.read_next_message().unwrap().unwrap();
+        assert_eq!(
+            (header.object_id, header.opcode),
+            (offer_id, u16::from(WlDataControlOfferOps::Receive))
+        );
+        assert_eq!(WlMessageReader::new(body).str(), Some(&b"text/plain"[..]));
+        fds.pop_last_in_fd()
+            .unwrap()
+            .fd_write_and_close(b"hello")
+            .unwrap();
+
+        let (header, ..) = compositor.read_next_message().unwrap().unwrap();
+        assert_eq!(
+            (header.object_id, header.opcode, header.size),
+            (offer_id, u16::from(WlDataControlOfferOps::Destroy), 8)
+        );
+        assert_eq!(router.lookup_slot(offer_id), None);
+
+        // Times out instead of hanging if the client kept its copy of the write end.
+        payload_rx
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let mut got = Vec::new();
+        payload_rx.read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"hello");
     }
 }

@@ -12,8 +12,8 @@ use std::{
 use crate::wl::{
     debug_println,
     objects::{
-        wl_data_managers::DataDeviceManagerExt, wl_data_source::WlDataControlSourceEvent,
-        wl_display::WlDisplay,
+        wl_data_managers::DataDeviceManagerExt,
+        wl_data_source::WlDataControlSourceEvent, wl_display::WlDisplay,
     },
     wl_buffered_stream::WLBufferedStream,
     wl_message_reader::WlMessageReader,
