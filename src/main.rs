@@ -6,12 +6,9 @@ use std::{
     process::exit,
 };
 
-use clip_for_fun::{debug_println,
-    DataDeviceManagerExt,
-    WlDataControlSourceEvent, WlDisplay,
-    WlBufferedStream,
-    WlMessageReader,
-    WlEvent, WlMessageRouter,
+use clip_for_fun::{
+    DataDeviceManagerExt, FdWriteAndClose, WlBufferedStream, WlDataControlSourceEvent, WlDisplay,
+    WlEvent, WlMessageReader, WlMessageRouter, debug_println,
 };
 
 fn main() {
@@ -104,7 +101,7 @@ fn main() {
                         fd,
                     }) => {
                         debug_println!(
-                            "Received send event with mime_type {} and fd {}",
+                            "Received send event with mime_type {} and fd {:?}",
                             String::from_utf8_lossy(mime_type),
                             fd
                         );

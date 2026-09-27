@@ -1,6 +1,8 @@
 use std::{
+    fs::File,
+    io::{ErrorKind, Write},
     os::{
-        fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+        fd::{FromRawFd, IntoRawFd, OwnedFd, RawFd},
         unix::net::UnixStream,
     },
     path::Path,
@@ -53,7 +55,7 @@ const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<R
 struct AlignedCmsghdr([u8; CTRL_BUFFER_SIZE]);
 
 impl cmsghdr {
-    fn fds_into(&self, fd_buffer: &mut WlFdBuffer) -> std::io::Result<()> {
+    fn fds_into(&self, fd_buffer: &mut FdBuffer) -> std::io::Result<()> {
         if self.cmsg_level == SOL_SOCKET && self.cmsg_type == SCM_RIGHTS {
             let data_ptr = unsafe { (self as *const cmsghdr).add(1) as *const RawFd };
             let fd_count = (self.cmsg_len - CMSG_FD_OFFSET) / std::mem::size_of::<RawFd>();
@@ -80,10 +82,10 @@ unsafe extern "C" {
     fn sendmsg(sockfd: RawFd, msg: *const msghdr, flags: i32) -> isize;
     // fn pipe2(fd: *mut RawFd, flags: i32) -> RawFd;
     fn close(fd: RawFd) -> i32;
-    fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
+    // fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
 }
 
-pub struct WlFdBuffer {
+pub struct FdBuffer {
     in_fds: [RawFd; FD_BUFFER_LEN],
     in_fd_count: usize,
     in_fds_cursor: usize,
@@ -91,55 +93,20 @@ pub struct WlFdBuffer {
     out_fd_count: usize,
 }
 
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct WlFd(OwnedFd);
-
-impl std::fmt::Display for WlFd {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.as_raw_fd())
-    }
+pub trait FdWriteAndClose {
+    fn fd_write_and_close(self, buf: &[u8]) -> std::io::Result<()>;
 }
 
-impl WlFd {
-    pub fn fd_write_and_close(self, data: &[u8]) -> std::io::Result<()> {
-        let mut bytes_written = 0;
-        let mut zero_retry_count = 0;
-        while bytes_written < data.len() {
-            let bytes_written_or_err = unsafe {
-                crate::unix_fd_stream::write(
-                    self.0.as_raw_fd(),
-                    data.as_ptr().add(bytes_written),
-                    data.len() - bytes_written,
-                )
-            };
-            if bytes_written_or_err > 0 {
-                bytes_written += bytes_written_or_err as usize;
-            } else if bytes_written_or_err == 0 {
-                zero_retry_count += 1;
-                if zero_retry_count > 10 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::WriteZero,
-                        "write returned zero too many times",
-                    ));
-                }
-                continue; // retry on zero write, which can happen with some special files
-            } else {
-                let error = std::io::Error::last_os_error();
-                match error.raw_os_error() {
-                    Some(4) => continue, // EINTR
-                    Some(32) => break,   // EPIPE, the reader has closed the pipe
-                    _ => {
-                        return Err(error);
-                    }
-                }
-            }
+impl FdWriteAndClose for OwnedFd {
+    fn fd_write_and_close(self, buf: &[u8]) -> std::io::Result<()> {
+        match File::from(self).write_all(buf) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::BrokenPipe => Ok(()),
+            Err(e) => Err(e),
         }
-        Ok(())
     }
 }
-
-impl WlFdBuffer {
+impl FdBuffer {
     pub fn new() -> Self {
         Self {
             in_fds: [0; FD_BUFFER_LEN],
@@ -150,7 +117,7 @@ impl WlFdBuffer {
         }
     }
 
-    pub fn pop_last_in_fd(&mut self) -> Option<WlFd> {
+    pub fn pop_last_in_fd(&mut self) -> Option<OwnedFd> {
         // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
         if self.in_fd_count == 0 {
             return None;
@@ -158,7 +125,7 @@ impl WlFdBuffer {
         let fd = self.in_fds[self.in_fds_cursor];
         self.in_fds_cursor = (self.in_fds_cursor + 1) % self.in_fds.len();
         self.in_fd_count -= 1;
-        unsafe { Some(WlFd(OwnedFd::from_raw_fd(fd))) }
+        unsafe { Some(OwnedFd::from_raw_fd(fd)) }
     }
 
     fn push_in_fds(&mut self, fds: &[RawFd]) -> std::io::Result<()> {
@@ -215,11 +182,7 @@ impl UnixFdStream {
         Ok(UnixStream::connect(path)?.into())
     }
 
-    pub fn read(
-        &mut self,
-        buffer: &mut [u8],
-        fd_buffer: &mut WlFdBuffer,
-    ) -> std::io::Result<usize> {
+    pub fn read(&mut self, buffer: &mut [u8], fd_buffer: &mut FdBuffer) -> std::io::Result<usize> {
         let mut iovec = iovec {
             iov_base: buffer.as_mut_ptr(),
             iov_len: buffer.len(),
@@ -357,7 +320,7 @@ impl Drop for UnixFdStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
+    use std::{fs::File, os::fd::AsRawFd};
 
     fn dev_null() -> RawFd {
         File::open("/dev/null").unwrap().into_raw_fd()
@@ -365,13 +328,13 @@ mod tests {
 
     #[test]
     fn in_fds_pop_in_fifo_order_across_wraparound() {
-        let mut buf = WlFdBuffer::new();
+        let mut buf = FdBuffer::new();
         // 3 does not divide FD_BUFFER_LEN, so some pushes straddle the wrap point.
         for _ in 0..FD_BUFFER_LEN {
             let fds: [RawFd; 3] = std::array::from_fn(|_| dev_null());
             buf.push_in_fds(&fds).unwrap();
             for expected in fds {
-                assert_eq!(buf.pop_last_in_fd().unwrap().0.as_raw_fd(), expected);
+                assert_eq!(buf.pop_last_in_fd().unwrap().as_raw_fd(), expected);
             }
         }
         assert!(buf.pop_last_in_fd().is_none());
@@ -379,7 +342,7 @@ mod tests {
 
     #[test]
     fn in_fds_overflow_is_an_error() {
-        let mut buf = WlFdBuffer::new();
+        let mut buf = FdBuffer::new();
         // Placeholders are never popped, so nothing tries to close them.
         buf.push_in_fds(&[-1; FD_BUFFER_LEN]).unwrap();
         assert!(buf.push_in_fds(&[-1]).is_err());

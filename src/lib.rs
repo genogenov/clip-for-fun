@@ -10,3 +10,5 @@ pub use wl::{
     wl_message_reader::WlMessageReader,
     wl_message_router::{WlEvent, WlMessageRouter},
 };
+
+pub use unix_fd_stream::FdWriteAndClose;

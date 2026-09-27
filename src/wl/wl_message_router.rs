@@ -1,13 +1,16 @@
-use crate::{debug_println, wl::{
-    objects::{
-        MessageHeader, WlCallbackEvents,
-        wl_data_control_device::{DataControlDeviceEvent, WlDataControlDevice},
-        wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
-        wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
-        wl_display::{DisplayEvent, WlDisplay},
+use crate::{
+    debug_println,
+    wl::{
+        objects::{
+            MessageHeader, WlCallbackEvents,
+            wl_data_control_device::{DataControlDeviceEvent, WlDataControlDevice},
+            wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
+            wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
+            wl_display::{DisplayEvent, WlDisplay},
+        },
+        wl_buffered_stream::WlBufferedStream,
     },
-    wl_buffered_stream::WlBufferedStream,
-}};
+};
 use std::{
     io::{Error, ErrorKind, Result},
     ops::ControlFlow,
@@ -229,13 +232,16 @@ impl WlMessageRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wl::{
-        objects::{
-            wl_data_control_device::WlDataControlDeviceEvents,
-            wl_data_offer::{WlDataControlOfferEvents, WlDataControlOfferOps},
-            wl_display::DisplayEvents,
+    use crate::{
+        FdWriteAndClose,
+        wl::{
+            objects::{
+                wl_data_control_device::WlDataControlDeviceEvents,
+                wl_data_offer::{WlDataControlOfferEvents, WlDataControlOfferOps},
+                wl_display::DisplayEvents,
+            },
+            wl_message_reader::WlMessageReader,
         },
-        wl_message_reader::WlMessageReader,
     };
     use std::{
         io::{Read, Write},

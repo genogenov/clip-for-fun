@@ -1,5 +1,7 @@
+use std::os::fd::OwnedFd;
+
 use crate::{
-    unix_fd_stream::{WlFd, WlFdBuffer},
+    unix_fd_stream::FdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
         wl_buffered_stream::WlBufferedStream,
@@ -29,7 +31,7 @@ wl_enum! {
 }
 
 pub enum WlDataControlSourceEvent<'a> {
-    Send { mime_type: &'a [u8], fd: WlFd },
+    Send { mime_type: &'a [u8], fd: OwnedFd },
     Cancelled,
 }
 
@@ -44,7 +46,7 @@ impl WlDataControlSource {
     pub fn parse_message<'a>(
         opcode: u16,
         buffer: &'a [u8],
-        fds: &mut WlFdBuffer,
+        fds: &mut FdBuffer,
     ) -> std::io::Result<WlDataControlSourceEvent<'a>> {
         if opcode == WlDataControlSourceEvents::Send as u16 {
             let mut reader = WlMessageReader::new(buffer);

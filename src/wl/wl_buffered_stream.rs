@@ -1,10 +1,10 @@
 use std::{os::fd::OwnedFd, path::Path};
 
 pub type NextMessageResult<'a> =
-    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WlFdBuffer)>>;
+    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut FdBuffer)>>;
 
 use crate::{
-    unix_fd_stream::{UnixFdStream, WlFdBuffer},
+    unix_fd_stream::{FdBuffer, UnixFdStream},
     wl::{
         objects::{MessageHeader, WlObject, WlStr},
         wl_message_router::{WlInterface, WlMessageRouter},
@@ -18,7 +18,7 @@ pub struct WlBufferedStream {
     read_buffer: [u8; 4096],
     read_cursor: usize,
     bytes_read: usize,
-    fd: WlFdBuffer,
+    fd: FdBuffer,
 }
 
 impl WlBufferedStream {
@@ -34,7 +34,7 @@ impl WlBufferedStream {
             read_buffer: [0u8; 4096],
             read_cursor: 0,
             bytes_read: 0,
-            fd: WlFdBuffer::new(),
+            fd: FdBuffer::new(),
         }
     }
 
@@ -182,9 +182,12 @@ impl WlBufferedStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wl::objects::{
-        wl_display::{DisplayOps, WlDisplay},
-        wl_str_bytes,
+    use crate::{
+        FdWriteAndClose,
+        wl::objects::{
+            wl_display::{DisplayOps, WlDisplay},
+            wl_str_bytes,
+        },
     };
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};

@@ -1,5 +1,5 @@
 use crate::{
-    unix_fd_stream::WlFdBuffer,
+    unix_fd_stream::FdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
         wl_buffered_stream::WlBufferedStream,
@@ -46,7 +46,7 @@ impl WlDataControlDevice {
     pub fn parse_message(
         opcode: u16,
         buffer: &[u8],
-        _fds: &mut WlFdBuffer,
+        _fds: &mut FdBuffer,
     ) -> std::io::Result<DataControlDeviceEvent> {
         let mut reader = WlMessageReader::new(buffer);
         match opcode {
