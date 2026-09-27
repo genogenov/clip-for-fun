@@ -1,10 +1,9 @@
 use crate::wl::{
-    objects::{
+    debug_println, objects::{
         MessageHeader, WLCallbackEvents,
         wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
         wl_display::{DisplayEvent, WlDisplay},
-    },
-    wl_buffered_stream::WLBufferedStream,
+    }, wl_buffered_stream::WLBufferedStream,
 };
 use std::{
     io::{Error, ErrorKind, Result},
@@ -62,6 +61,7 @@ impl WlMessageRouter {
     pub fn register(&mut self, interface: WlInterface) -> Result<u32> {
         if let Some(free_index) = self.find_free_client() {
             self.client_interfaces[free_index] = Slot::Live(interface);
+            debug_println!("Registered interface {:?} at client slot {}", interface, free_index);
             Ok(free_index as u32)
         } else {
             Err(Error::other("No free client slot available"))
@@ -105,6 +105,7 @@ impl WlMessageRouter {
                             target_object_id, error_code, error_msg
                         ))),
                         DisplayEvent::DeleteId { id } => {
+                            debug_println!("Deleting WL client object id: {}", id);
                             if let Some(slot) = self.client_interfaces.get_mut(id as usize) {
                                 *slot = Slot::Free;
                             }
@@ -133,7 +134,7 @@ impl WlMessageRouter {
     ) -> std::io::Result<()> {
         while let Some(event) = self.next_event(stream)? {
             if fnhandler(event).is_break() {
-                break;
+                return Ok(());
             }
         }
 
