@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use std::{marker::PhantomData, ptr};
+use std::marker::PhantomData;
 
 use crate::wl::objects::wl_data_managers::{
     DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager,

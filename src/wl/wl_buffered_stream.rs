@@ -38,15 +38,8 @@ impl WLBufferedStream {
         }
     }
 
-    #[inline(always)]
-    pub fn begin_read(&mut self) -> std::io::Result<()> {
-        self.bytes_read = self.stream.read(&mut self.read_buffer, &mut self.fd)?;
-        self.read_cursor = 0;
-        Ok(())
-    }
-
     pub fn read_next_message(&mut self) -> NextMessageResult<'_> {
-        while self.bytes_read > 0 {
+        loop {
             if (self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize) <= self.bytes_read {
                 let header: MessageHeader =
                     MessageHeader::parse(&self.read_buffer, self.read_cursor);
@@ -97,8 +90,6 @@ impl WLBufferedStream {
             self.bytes_read = remaining_bytes + new_bytes_read;
             self.read_cursor = 0;
         }
-
-        Ok(None)
     }
 
     #[inline(always)]
@@ -217,7 +208,6 @@ mod tests {
         }
         tx.write().unwrap();
 
-        rx.begin_read().unwrap();
         for (id, opcode) in [(3, 0), (4, 1)] {
             let (header, buf, _) = rx.read_next_message().unwrap().unwrap();
             assert_eq!(
@@ -241,7 +231,6 @@ mod tests {
         tx.write().unwrap();
 
         let payloads: [&[u8]; 2] = [b"first", b"second"];
-        rx.begin_read().unwrap();
         for payload in payloads {
             let (header, _, fds) = rx.read_next_message().unwrap().unwrap();
             // fd arguments add no bytes to the message
@@ -327,7 +316,6 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
         });
         let mut stream = WLBufferedStream::connect(&path).unwrap();
-        stream.begin_read().unwrap(); // gets only the 8 header bytes
         let got = stream.read_next_message().unwrap();
         let ok = matches!(&got, Some((h, _, _)) if h.object_id == 5 && h.size == 12);
         t.join().unwrap();

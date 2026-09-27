@@ -1,13 +1,8 @@
-use std::{ops::ControlFlow, ptr};
-
-use crate::{
-    unix_fd_stream::WLFdBuffer,
-    wl::{
-        objects::{MessageHeader, WLCallbackEvents, WLObject, wl_enum, wl_registry::WlRegistry},
-        wl_buffered_stream::WLBufferedStream,
-        wl_message_reader::WlMessageReader,
-        wl_message_router::{WlInterface, WlMessageRouter},
-    },
+use crate::wl::{
+    objects::{WLObject, wl_enum, wl_registry::WlRegistry},
+    wl_buffered_stream::WLBufferedStream,
+    wl_message_reader::WlMessageReader,
+    wl_message_router::{WlInterface, WlMessageRouter},
 };
 
 pub struct WlDisplay {
@@ -21,24 +16,29 @@ impl WlDisplay {
         Self { callback_id: 0 }
     }
 
-    pub fn parse_message(header: &MessageHeader, reader: &mut WlMessageReader) -> Option<DisplayEvent> {
-        if header.object_id == Self::TYPE_ID {
-            match header.opcode {
-                val if val == DisplayEvents::Error as u16 => {
-                    let target_object_id = reader.u32()?;
-                    let error_code = reader.u32()?;
+    pub fn parse_message(opcode: u16, buffer: &[u8]) -> Option<DisplayEvent> {
+        match opcode {
+            DISPLAYEVENT_ERROR => {
+                let mut reader = WlMessageReader::new(buffer);
+                let target_object_id = reader.u32()?;
+                let error_code = reader.u32()?;
 
-                    let error_msg_slice = reader.str()?;
-                    let error_msg = String::from_utf8_lossy(error_msg_slice);
+                let error_msg_slice = reader.str()?;
+                let error_msg = String::from_utf8_lossy(error_msg_slice);
 
-                    return Some(DisplayEvent::Error {
-                        target_object_id,
-                        error_code,
-                        error_msg: error_msg.into_owned(),
-                    });
-                }
-                _ => {}
+                return Some(DisplayEvent::Error {
+                    target_object_id,
+                    error_code,
+                    error_msg: error_msg.into_owned(),
+                });
             }
+            DISPLAYEVENT_DELETEID => {
+                let mut reader = WlMessageReader::new(buffer);
+                let id = reader.u32()?;
+
+                return Some(DisplayEvent::DeleteId { id });
+            }
+            _ => {}
         }
         None
     }
@@ -56,7 +56,7 @@ impl WlDisplay {
         Ok(WlRegistry::new(registry_id))
     }
 
-    pub fn roundtrip_sync(
+    pub fn sync(
         &mut self,
         stream: &mut WLBufferedStream,
         router: &mut WlMessageRouter,
@@ -65,50 +65,7 @@ impl WlDisplay {
         self.callback_id = stream.pack_new_object_id(router, WlInterface::Callback)?;
         stream.end_message(sync_start);
 
-        stream.write()?;
-        stream.begin_read()
-    }
-
-    pub fn dispatch_messages<F>(
-        &mut self,
-        stream: &mut WLBufferedStream,
-        mut handler: F,
-    ) -> std::io::Result<()>
-    where
-        F: FnMut(&MessageHeader, &mut WlMessageReader, &mut WLFdBuffer),
-    {
-        while let Some((header, buffer, fds)) = stream.read_next_message()? {
-            if header.object_id == self.callback_id
-                && header.opcode == WLCallbackEvents::Done as u16
-            {
-                return Ok(());
-            } else if header.object_id == WlDisplay::TYPE_ID {
-                let Some(display_event) =
-                    Self::parse_message(&header, &mut WlMessageReader::new(buffer))
-                else {
-                    continue;
-                };
-                {
-                    match display_event {
-                        DisplayEvent::Error {
-                            target_object_id,
-                            error_code,
-                            error_msg,
-                        } => {
-                            return Err(std::io::Error::other(format!(
-                                "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
-                                target_object_id, error_code, error_msg
-                            )));
-                        }
-                    }
-                }
-            }
-
-            let mut reader = WlMessageReader::new(buffer);
-            handler(&header, &mut reader, fds);
-        }
-
-        Ok(())
+        stream.write()
     }
 }
 
@@ -126,9 +83,13 @@ wl_enum! {
 
 wl_enum! {
     pub enum DisplayEvents {
-        Error = 0,
+        Error = DISPLAYEVENT_ERROR,
+        DeleteId = DISPLAYEVENT_DELETEID,
     }
 }
+
+pub const DISPLAYEVENT_ERROR: u16 = 0;
+pub const DISPLAYEVENT_DELETEID: u16 = 1;
 
 #[repr(u16)]
 #[derive(Debug)]
@@ -137,5 +98,8 @@ pub enum DisplayEvent {
         target_object_id: u32,
         error_code: u32,
         error_msg: String,
+    },
+    DeleteId {
+        id: u32,
     },
 }

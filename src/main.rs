@@ -4,6 +4,7 @@ mod wl;
 use std::{
     env,
     io::{Read, stdin},
+    ops::ControlFlow,
     path::PathBuf,
     process::exit,
 };
@@ -15,7 +16,8 @@ use crate::wl::{
         wl_display::WlDisplay,
     },
     wl_buffered_stream::WLBufferedStream,
-    wl_message_router::WlMessageRouter,
+    wl_message_reader::WlMessageReader,
+    wl_message_router::{WLEvent, WlMessageRouter},
 };
 
 fn main() {
@@ -48,10 +50,15 @@ fn main() {
     let mut router = WlMessageRouter::new();
 
     let mut registry = display.get_registry(&mut stream, &mut router).unwrap();
-    display.roundtrip_sync(&mut stream, &mut router).unwrap();
-    display
-        .dispatch_messages(&mut stream, |header, reader, _| {
-            registry.add_interface(header, reader);
+    display.sync(&mut stream, &mut router).unwrap();
+    router
+        .dispatch_messages(&mut stream, |event| match event {
+            WLEvent::Registry(header, buffer) => {
+                registry.add_interface(&header, &mut WlMessageReader::new(buffer));
+                ControlFlow::Continue(())
+            }
+            WLEvent::SyncDone => ControlFlow::Break(()),
+            _ => ControlFlow::Continue(()),
         })
         .unwrap();
 
@@ -75,7 +82,7 @@ fn main() {
         let local_data_device = mgr_local
             .get_data_device(&mut stream, &mut router, seat_local.local_id)
             .unwrap();
-        let mut data_source = mgr_local
+        let data_source = mgr_local
             .create_data_source(&mut stream, &mut router)
             .unwrap();
         data_source.offer(&mut stream, "text/plain");
@@ -93,38 +100,35 @@ fn main() {
 
         debug_println!("Read input data: {:?}", in_str);
 
-        display.roundtrip_sync(&mut stream, &mut router).unwrap();
+        display.sync(&mut stream, &mut router).unwrap();
 
-        loop {
-            display
-                .dispatch_messages(&mut stream, |header, reader, fds| {
-                    debug_println!(
-                        "Received message for object_id {} with opcode {}",
-                        header.object_id,
-                        header.opcode
-                    );
-                    if let Some(event) = data_source.parse_message(header, reader, fds) {
-                        match event {
-                            #[cfg_attr(not(debug_assertions), expect(unused_variables))]
-                            WlDataControlSourceEvent::Send { mime_type, fd } => {
-                                debug_println!(
-                                    "Received send event with mime_type {} and fd {}",
-                                    str::from_utf8(mime_type).unwrap(),
-                                    fd
-                                );
+        router
+            .dispatch_messages(&mut stream, |wl_event| {
+                match wl_event {
+                    WLEvent::DataControlSource(WlDataControlSourceEvent::Send {
+                        mime_type,
+                        fd,
+                    }) => {
+                        debug_println!(
+                            "Received send event with mime_type {} and fd {}",
+                            String::from_utf8_lossy(mime_type),
+                            fd
+                        );
 
-                                // Serve to pasting client via fd it sent.
-                                fd.fd_write_and_close(&in_str).unwrap();
-                            }
-                            WlDataControlSourceEvent::Cancelled => {
-                                debug_println!("Received cancelled event. Exiting...");
-                                exit(0);
-                            }
+                        // Serve to pasting client via fd it sent.
+                        if fd.fd_write_and_close(&in_str).is_err() {
+                            eprintln!("Failed to write to fd");
                         }
+                        ControlFlow::Continue(())
                     }
-                })
-                .unwrap();
-        }
+                    WLEvent::DataControlSource(WlDataControlSourceEvent::Cancelled) => {
+                        debug_println!("Received cancelled event. Exiting...");
+                        ControlFlow::Break(())
+                    }
+                    _ => ControlFlow::Continue(()),
+                }
+            })
+            .unwrap();
     } else {
         eprintln!("error: this compositor does not support ext_data_control_manager_v1");
         exit(1);

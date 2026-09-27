@@ -1,9 +1,7 @@
-use std::ptr;
-
 use crate::{
     unix_fd_stream::{WLFd, WLFdBuffer},
     wl::{
-        objects::{MessageHeader, WLObject, wl_enum},
+        objects::{WLObject, wl_enum},
         wl_buffered_stream::WLBufferedStream,
         wl_message_reader::WlMessageReader,
     },
@@ -44,24 +42,24 @@ impl WlDataControlSource {
     }
 
     pub fn parse_message<'a>(
-        &self,
-        header: &MessageHeader,
-        reader: &'a mut WlMessageReader,
+        opcode: u16,
+        buffer: &'a [u8],
         fds: &mut WLFdBuffer,
-    ) -> Option<WlDataControlSourceEvent<'a>> {
-        if header.object_id != self.local_id {
-            return None;
-        }
-        if header.opcode == WlDataControlSourceEvents::Send as u16 {
-            // alloc... think about a more performant way to do this without allocation, maybe preallocated str buffers.
-            let mime_type = reader.str()?;
-            return Some(WlDataControlSourceEvent::Send {
+    ) -> std::io::Result<WlDataControlSourceEvent<'a>> {
+        if opcode == WlDataControlSourceEvents::Send as u16 {
+            let mut reader = WlMessageReader::new(buffer);
+            let mime_type = reader
+                .str()
+                .ok_or_else(|| std::io::Error::other("Failed to read mime type"))?;
+            return Ok(WlDataControlSourceEvent::Send {
                 mime_type,
-                fd: fds.pop_last_in_fd().unwrap(),
+                fd: fds
+                    .pop_last_in_fd()
+                    .ok_or_else(|| std::io::Error::other("Failed to pop file descriptor"))?,
             });
-        } else if header.opcode == WlDataControlSourceEvents::Cancelled as u16 {
-            return Some(WlDataControlSourceEvent::Cancelled);
+        } else if opcode == WlDataControlSourceEvents::Cancelled as u16 {
+            return Ok(WlDataControlSourceEvent::Cancelled);
         }
-        None
+        Err(std::io::Error::other("Unknown opcode"))
     }
 }

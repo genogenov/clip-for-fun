@@ -1,15 +1,15 @@
-use crate::{
-    unix_fd_stream::WLFdBuffer,
-    wl::{
-        objects::{
-            MessageHeader, WLCallbackEvents,
-            wl_display::{DisplayEvent, WlDisplay},
-        },
-        wl_buffered_stream::WLBufferedStream,
-        wl_message_reader::WlMessageReader,
+use crate::wl::{
+    objects::{
+        MessageHeader, WLCallbackEvents,
+        wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
+        wl_display::{DisplayEvent, WlDisplay},
     },
+    wl_buffered_stream::WLBufferedStream,
 };
-use std::io::{Error, ErrorKind::Other, Result};
+use std::{
+    io::{Error, ErrorKind, Result},
+    ops::ControlFlow,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WlInterface {
@@ -30,6 +30,15 @@ pub enum Slot {
     Free,
     Live(WlInterface),
     Reserved,
+}
+
+pub enum WLEvent<'a> {
+    DataControlSource(WlDataControlSourceEvent<'a>),
+    Registry(MessageHeader, &'a [u8]),
+
+    SyncDone,
+
+    Ignored,
 }
 
 const MAX_REGISTERED_INTERFACES: usize = 16;
@@ -59,75 +68,79 @@ impl WlMessageRouter {
         }
     }
 
-    pub fn dispatch_messages<F>(
+    fn next_event<'a>(
         &mut self,
-        stream: &mut WLBufferedStream,
-        mut handler: F,
-    ) -> std::io::Result<()>
-    where
-        F: FnMut(&MessageHeader, &mut WlMessageReader, &mut WLFdBuffer),
-    {
-        while let Some((header, buffer, fds)) = stream.read_next_message()? {
-            let interface = self
-                .lookup_slot(header.object_id)
-                .ok_or_else(|| Error::other("No slot found"))?;
+        stream: &'a mut WLBufferedStream,
+    ) -> std::io::Result<Option<WLEvent<'a>>> {
+        let Some((header, buffer, fds)) = stream.read_next_message()? else {
+            return Ok(None);
+        };
+        {
+            let interface = match self.lookup_slot(header.object_id) {
+                Some(interface) => interface,
+                // compositor-created object we don't track (e.g. an offer)
+                None if header.object_id >= 0xff00_0000 => return Ok(Some(WLEvent::Ignored)),
+                None => return Err(Error::other("No slot found")),
+            };
 
             match interface {
                 WlInterface::Callback => {
                     if header.opcode == WLCallbackEvents::Done as u16 {
-                        return Ok(());
+                        return Ok(Some(WLEvent::SyncDone));
                     }
+                    Err(Error::other("Unknown opcode"))
                 }
                 WlInterface::Display => {
-                    let Some(display_event) =
-                        WlDisplay::parse_message(&header, &mut WlMessageReader::new(buffer))
+                    let Some(display_event) = WlDisplay::parse_message(header.opcode, buffer)
                     else {
-                        continue;
+                        return Ok(Some(WLEvent::Ignored));
                     };
                     match display_event {
                         DisplayEvent::Error {
                             target_object_id,
                             error_code,
                             error_msg,
-                        } => {
-                            return Err(std::io::Error::other(format!(
-                                "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
-                                target_object_id, error_code, error_msg
-                            )));
+                        } => Err(std::io::Error::other(format!(
+                            "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
+                            target_object_id, error_code, error_msg
+                        ))),
+                        DisplayEvent::DeleteId { id } => {
+                            if let Some(slot) = self.client_interfaces.get_mut(id as usize) {
+                                *slot = Slot::Free;
+                            }
+                            Ok(Some(WLEvent::Ignored))
                         }
                     }
                 }
-                WlInterface::Seat => {
-                    // Handle Seat interface messages
-                }
-                WlInterface::ExtDataControlManager => {
-                    // Handle ExtDataControlManager interface messages
-                }
-                WlInterface::ZwlrDataControlManager => {
-                    // Handle ZwlrDataControlManager interface messages
-                }
-                WlInterface::DataDeviceManager => {
-                    // Handle DataDeviceManager interface messages
-                }
-                WlInterface::DataControlDevice => {
-                    // Handle DataControlDevice interface messages
-                }
-                WlInterface::DataControlSource => {
-                    // Handle DataControlSource interface messages
-                }
-                WlInterface::DataControlOffer => {
-                    // Handle DataControlOffer interface messages
-                }
-                WlInterface::Registry => {
-                    // Handle Registry interface messages
-                }
+                WlInterface::Seat => Ok(Some(WLEvent::Ignored)),
+                WlInterface::ExtDataControlManager => Ok(Some(WLEvent::Ignored)),
+                WlInterface::ZwlrDataControlManager => Ok(Some(WLEvent::Ignored)),
+                WlInterface::DataDeviceManager => Ok(Some(WLEvent::Ignored)),
+                WlInterface::DataControlDevice => Ok(Some(WLEvent::Ignored)),
+                WlInterface::DataControlSource => Ok(Some(WLEvent::DataControlSource(
+                    WlDataControlSource::parse_message(header.opcode, buffer, fds)?,
+                ))),
+                WlInterface::DataControlOffer => Ok(Some(WLEvent::Ignored)),
+                WlInterface::Registry => Ok(Some(WLEvent::Registry(header, buffer))),
             }
+        }
+    }
 
-            let mut reader = WlMessageReader::new(buffer);
-            handler(&header, &mut reader, fds);
+    pub fn dispatch_messages<F: FnMut(WLEvent<'_>) -> ControlFlow<()>>(
+        &mut self,
+        stream: &mut WLBufferedStream,
+        mut fnhandler: F,
+    ) -> std::io::Result<()> {
+        while let Some(event) = self.next_event(stream)? {
+            if fnhandler(event).is_break() {
+                break;
+            }
         }
 
-        Ok(())
+        Err(std::io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "Unexpected end of stream",
+        ))
     }
 
     fn find_free_client(&self) -> Option<usize> {
@@ -136,10 +149,16 @@ impl WlMessageRouter {
             .position(|slot| *slot == Slot::Free)
     }
 
-    fn lookup_slot(&self, object_id: u32) -> Option<&WlInterface> {
-        let slot = self.client_interfaces.get(object_id as usize);
+    fn lookup_slot(&self, object_id: u32) -> Option<WlInterface> {
+        const SERVER_ID_START: u32 = 0xff000000;
+        let slot = if object_id >= SERVER_ID_START {
+            self.server_interfaces
+                .get((object_id - SERVER_ID_START) as usize)
+        } else {
+            self.client_interfaces.get(object_id as usize)
+        };
         match slot {
-            Some(Slot::Live(interface)) => Some(interface),
+            Some(Slot::Live(interface)) => Some(*interface),
             Some(Slot::Free) => None,
             Some(Slot::Reserved) => None,
             None => None,
