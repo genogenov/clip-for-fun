@@ -97,14 +97,18 @@ impl WlMessageRouter {
     pub fn register_server(&mut self, interface: WlInterface, id: u32) -> Result<u32> {
         if let Some(slot) = self.server_interfaces.get_mut(
             id.checked_sub(SERVER_ID_START)
-                .ok_or_else(|| Error::other(format!("Invalid server slot id {}(local array id: {})", id, (id - SERVER_ID_START))))?
+                .ok_or_else(|| Error::other(format!("Invalid server slot id {}", id)))?
                 as usize,
         ) {
             *slot = Slot::Live(interface);
             debug_println!("Registered interface {:?} at server slot {}", interface, id);
             Ok(id)
         } else {
-            Err(Error::other(format!("Invalid server slot id {}(local array id: {})", id, (id - SERVER_ID_START))))
+            Err(Error::other(format!(
+                "Invalid server slot id {}(local array id: {})",
+                id,
+                (id - SERVER_ID_START)
+            )))
         }
     }
 
@@ -160,7 +164,8 @@ impl WlMessageRouter {
                 WlInterface::DataControlDevice => {
                     let data_control_device_event =
                         WlDataControlDevice::parse_message(header.opcode, buffer, fds)?;
-                    if let DataControlDeviceEvent::DataOffer { new_id } = data_control_device_event {
+                    if let DataControlDeviceEvent::DataOffer { new_id } = data_control_device_event
+                    {
                         self.register_server(WlInterface::DataControlOffer, new_id)?;
                     }
                     Ok(Some(WlEvent::DataControlDevice(data_control_device_event)))
@@ -487,5 +492,99 @@ mod tests {
         let mut got = Vec::new();
         payload_rx.read_to_end(&mut got).unwrap();
         assert_eq!(got, b"hello");
+    }
+
+    #[test]
+    fn paste_burst_is_routed_per_offer_and_messages_after_done_are_kept() {
+        let (mut router, mut stream, mut peer) = setup();
+        let seat = router.register(WlInterface::Seat).unwrap();
+        let device = router.register(WlInterface::DataControlDevice).unwrap();
+        let callback = router.register(WlInterface::Callback).unwrap();
+        let (clipboard, primary) = (0xff00_0000u32, 0xff00_0001u32);
+
+        // What a compositor sends right after bind + get_data_device + sync, in one write.
+        let mut burst = msg(seat, 0, &3u32.to_ne_bytes());
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &clipboard.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            clipboard,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/html"),
+        ));
+        burst.extend(msg(
+            clipboard,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/plain;charset=utf-8"),
+        ));
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::Selection.into(),
+            &clipboard.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &primary.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            primary,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/plain"),
+        ));
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::PrimarySelection.into(),
+            &primary.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            callback,
+            WlCallbackEvents::Done as u16,
+            &0u32.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            WlDisplay::TYPE_ID,
+            DisplayEvents::DeleteId.into(),
+            &callback.to_ne_bytes(),
+        ));
+        peer.write_all(&burst).unwrap();
+
+        let mut mimes = Vec::new();
+        let mut selection = None;
+        router
+            .dispatch_messages(&mut stream, |event| {
+                match event {
+                    WlEvent::DataControlOffer {
+                        id,
+                        event: DataControlOfferEvent::Offer { mime },
+                    } => mimes.push((id, mime.to_vec())),
+                    WlEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id }) => {
+                        selection = offer_id
+                    }
+                    WlEvent::SyncDone => return ControlFlow::Break(()),
+                    _ => {}
+                }
+                ControlFlow::Continue(())
+            })
+            .unwrap();
+
+        assert_eq!(selection, Some(clipboard));
+        assert_eq!(
+            mimes,
+            [
+                (clipboard, b"text/html".to_vec()),
+                (clipboard, b"text/plain;charset=utf-8".to_vec()),
+                (primary, b"text/plain".to_vec()),
+            ]
+        );
+
+        // delete_id arrived in the same read, after done: it must not be dropped.
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::Ignored)
+        ));
+        assert_eq!(router.register(WlInterface::Callback).unwrap(), callback);
     }
 }
