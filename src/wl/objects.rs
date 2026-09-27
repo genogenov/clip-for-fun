@@ -7,7 +7,7 @@ pub mod wl_data_source;
 pub mod wl_display;
 pub mod wl_registry;
 
-pub trait WLObject {
+pub trait WlObject {
     type Ops: Into<u16>;
     type Events;
 }
@@ -63,7 +63,7 @@ macro_rules! wl_enum {
 pub(crate) use wl_enum;
 
 #[repr(u16)]
-pub enum WLCallbackEvents {
+pub enum WlCallbackEvents {
     Done = 0,
 }
 

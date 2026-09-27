@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
+use crate::wl::objects::NoEvents;
 use crate::wl::objects::wl_data_managers::{
     DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager,
     ZwlrDataControlManager, ZwlrDataControlManagerV1,
@@ -8,14 +9,14 @@ use crate::wl::objects::wl_data_managers::{
 use crate::wl::wl_message_reader::WlMessageReader;
 use crate::wl::wl_message_router::{WlInterface, WlMessageRouter};
 use crate::wl::{
-    objects::{MessageHeader, WLObject, WlStr, wl_enum, wl_str_bytes},
-    wl_buffered_stream::WLBufferedStream,
+    objects::{MessageHeader, WlObject, WlStr, wl_enum, wl_str_bytes},
+    wl_buffered_stream::WlBufferedStream,
 };
 
 #[derive(Debug, Clone, Copy)]
 pub struct RegistryInterface<I>
 where
-    I: WLObject,
+    I: WlObject,
 {
     pub global_name: u32,
     pub version: u32,
@@ -26,13 +27,13 @@ where
 
 pub struct BoundInterface<I>
 where
-    I: WLObject,
+    I: WlObject,
 {
     pub local_id: u32,
     marker: PhantomData<I>,
 }
 
-impl<I: WLObject> BoundInterface<I> {
+impl<I: WlObject> BoundInterface<I> {
     pub fn new(local_id: u32) -> Self {
         Self {
             local_id,
@@ -41,16 +42,16 @@ impl<I: WLObject> BoundInterface<I> {
     }
 }
 
-impl<I: WLObject> WLObject for BoundInterface<I> {
+impl<I: WlObject> WlObject for BoundInterface<I> {
     type Ops = I::Ops;
     type Events = I::Events;
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct WlSeat;
-impl WLObject for WlSeat {
+impl WlObject for WlSeat {
     type Ops = WlSeatOps;
-    type Events = WlSeatEvents;
+    type Events = NoEvents;
 }
 wl_enum! {
     pub enum WlSeatOps {
@@ -59,17 +60,6 @@ wl_enum! {
         GetTouch = 2,
         Release = 3,
     }
-}
-
-// #[repr(u8)]
-// pub enum WLSeatCapability {
-//     Pointer = 1,
-//     Keyboard = 2,
-//     Touch = 4,
-// }
-
-pub enum WlSeatEvents {
-    // Capabilities(WLSeatCapability),
 }
 
 wl_enum! {
@@ -116,12 +106,12 @@ impl WlRegistry {
 
     pub fn bind<I>(
         &self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         router: &mut WlMessageRouter,
         interface: RegistryInterface<I>,
     ) -> std::io::Result<BoundInterface<I>>
     where
-        I: WLObject,
+        I: WlObject,
     {
         let bind_start = stream.begin_message::<WlRegistry>(RegistryOps::Bind, self.type_id);
         stream.pack_u32(interface.global_name);
@@ -201,7 +191,7 @@ impl WlRegistry {
     const WL_SEAT: WlStr = wl_str_bytes!("wl_seat");
 }
 
-impl WLObject for WlRegistry {
+impl WlObject for WlRegistry {
     type Ops = RegistryOps;
     type Events = RegistryEvents;
 }

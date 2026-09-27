@@ -1,14 +1,13 @@
-use crate::wl::{
-    debug_println,
+use crate::{debug_println, wl::{
     objects::{
-        MessageHeader, WLCallbackEvents,
+        MessageHeader, WlCallbackEvents,
         wl_data_control_device::{DataControlDeviceEvent, WlDataControlDevice},
         wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
         wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
         wl_display::{DisplayEvent, WlDisplay},
     },
-    wl_buffered_stream::WLBufferedStream,
-};
+    wl_buffered_stream::WlBufferedStream,
+}};
 use std::{
     io::{Error, ErrorKind, Result},
     ops::ControlFlow,
@@ -37,7 +36,7 @@ pub enum Slot {
     Reserved,
 }
 
-pub enum WLEvent<'a> {
+pub enum WlEvent<'a> {
     DataControlSource(WlDataControlSourceEvent<'a>),
 
     DataControlDevice(DataControlDeviceEvent),
@@ -102,8 +101,8 @@ impl WlMessageRouter {
 
     fn next_event<'a>(
         &mut self,
-        stream: &'a mut WLBufferedStream,
-    ) -> std::io::Result<Option<WLEvent<'a>>> {
+        stream: &'a mut WlBufferedStream,
+    ) -> std::io::Result<Option<WlEvent<'a>>> {
         let Some((header, buffer, fds)) = stream.read_next_message()? else {
             return Ok(None);
         };
@@ -111,21 +110,21 @@ impl WlMessageRouter {
             let interface = match self.lookup_slot(header.object_id) {
                 Some(interface) => interface,
                 // compositor-created object we don't track (e.g. an offer)
-                None if header.object_id >= 0xff00_0000 => return Ok(Some(WLEvent::Ignored)),
+                None if header.object_id >= 0xff00_0000 => return Ok(Some(WlEvent::Ignored)),
                 None => return Err(Error::other("No slot found")),
             };
 
             match interface {
                 WlInterface::Callback => {
-                    if header.opcode == WLCallbackEvents::Done as u16 {
-                        return Ok(Some(WLEvent::SyncDone));
+                    if header.opcode == WlCallbackEvents::Done as u16 {
+                        return Ok(Some(WlEvent::SyncDone));
                     }
                     Err(Error::other("Unknown opcode"))
                 }
                 WlInterface::Display => {
                     let Some(display_event) = WlDisplay::parse_message(header.opcode, buffer)
                     else {
-                        return Ok(Some(WLEvent::Ignored));
+                        return Ok(Some(WlEvent::Ignored));
                     };
                     match display_event {
                         DisplayEvent::Error {
@@ -141,14 +140,14 @@ impl WlMessageRouter {
                             if let Some(slot) = self.client_interfaces.get_mut(id as usize) {
                                 *slot = Slot::Free;
                             }
-                            Ok(Some(WLEvent::Ignored))
+                            Ok(Some(WlEvent::Ignored))
                         }
                     }
                 }
-                WlInterface::Seat => Ok(Some(WLEvent::Ignored)),
-                WlInterface::ExtDataControlManager => Ok(Some(WLEvent::Ignored)),
-                WlInterface::ZwlrDataControlManager => Ok(Some(WLEvent::Ignored)),
-                WlInterface::DataDeviceManager => Ok(Some(WLEvent::Ignored)),
+                WlInterface::Seat => Ok(Some(WlEvent::Ignored)),
+                WlInterface::ExtDataControlManager => Ok(Some(WlEvent::Ignored)),
+                WlInterface::ZwlrDataControlManager => Ok(Some(WlEvent::Ignored)),
+                WlInterface::DataDeviceManager => Ok(Some(WlEvent::Ignored)),
                 WlInterface::DataControlDevice => {
                     let data_control_device_event =
                         WlDataControlDevice::parse_message(header.opcode, buffer, fds)?;
@@ -158,20 +157,20 @@ impl WlMessageRouter {
                         }
                         _ => {}
                     }
-                    Ok(Some(WLEvent::DataControlDevice(data_control_device_event)))
+                    Ok(Some(WlEvent::DataControlDevice(data_control_device_event)))
                 }
-                WlInterface::DataControlSource => Ok(Some(WLEvent::DataControlSource(
+                WlInterface::DataControlSource => Ok(Some(WlEvent::DataControlSource(
                     WlDataControlSource::parse_message(header.opcode, buffer, fds)?,
                 ))),
                 WlInterface::DataControlOffer => {
                     let data_control_offer_event =
                         WlDataControlOffer::parse_message(header.opcode, buffer, fds)?;
-                    Ok(Some(WLEvent::DataControlOffer {
+                    Ok(Some(WlEvent::DataControlOffer {
                         id: header.object_id,
                         event: data_control_offer_event,
                     }))
                 }
-                WlInterface::Registry => Ok(Some(WLEvent::Registry(header, buffer))),
+                WlInterface::Registry => Ok(Some(WlEvent::Registry(header, buffer))),
             }
         }
     }
@@ -188,9 +187,9 @@ impl WlMessageRouter {
         Ok(())
     }
 
-    pub fn dispatch_messages<F: FnMut(WLEvent<'_>) -> ControlFlow<()>>(
+    pub fn dispatch_messages<F: FnMut(WlEvent<'_>) -> ControlFlow<()>>(
         &mut self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         mut fnhandler: F,
     ) -> std::io::Result<()> {
         while let Some(event) = self.next_event(stream)? {
@@ -262,11 +261,11 @@ mod tests {
     }
 
     // The peer end plays the compositor.
-    fn setup() -> (WlMessageRouter, WLBufferedStream, UnixStream) {
+    fn setup() -> (WlMessageRouter, WlBufferedStream, UnixStream) {
         let (a, peer) = UnixStream::pair().unwrap();
         (
             WlMessageRouter::new(),
-            WLBufferedStream::new(a.into()),
+            WlBufferedStream::new(a.into()),
             peer,
         )
     }
@@ -286,7 +285,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             router.next_event(&mut stream).unwrap(),
-            Some(WLEvent::Ignored)
+            Some(WlEvent::Ignored)
         ));
         assert_eq!(router.register(WlInterface::DataControlSource).unwrap(), 3);
     }
@@ -321,20 +320,20 @@ mod tests {
 
         assert!(matches!(
             router.next_event(&mut stream).unwrap(),
-            Some(WLEvent::DataControlDevice(DataControlDeviceEvent::DataOffer { new_id })) if new_id == offer
+            Some(WlEvent::DataControlDevice(DataControlDeviceEvent::DataOffer { new_id })) if new_id == offer
         ));
         assert!(matches!(
             router.next_event(&mut stream).unwrap(),
-            Some(WLEvent::DataControlOffer { id, event: DataControlOfferEvent::Offer { mime } })
+            Some(WlEvent::DataControlOffer { id, event: DataControlOfferEvent::Offer { mime } })
                 if id == offer && mime == b"text/plain"
         ));
         assert!(matches!(
             router.next_event(&mut stream).unwrap(),
-            Some(WLEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id: Some(id) })) if id == offer
+            Some(WlEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id: Some(id) })) if id == offer
         ));
         assert!(matches!(
             router.next_event(&mut stream).unwrap(),
-            Some(WLEvent::DataControlDevice(
+            Some(WlEvent::DataControlDevice(
                 DataControlDeviceEvent::PrimarySelection { offer_id: None }
             ))
         ));
@@ -347,7 +346,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             router.next_event(&mut stream).unwrap(),
-            Some(WLEvent::Ignored)
+            Some(WlEvent::Ignored)
         ));
 
         peer.write_all(&msg(9, 0, &[])).unwrap();
@@ -388,13 +387,13 @@ mod tests {
         let callback = router.register(WlInterface::Callback).unwrap();
         peer.write_all(&msg(
             callback,
-            WLCallbackEvents::Done as u16,
+            WlCallbackEvents::Done as u16,
             &7u32.to_ne_bytes(),
         ))
         .unwrap();
         assert!(matches!(
             router.next_event(&mut stream).unwrap(),
-            Some(WLEvent::SyncDone)
+            Some(WlEvent::SyncDone)
         ));
 
         let mut body = 2u32.to_ne_bytes().to_vec();
@@ -414,7 +413,7 @@ mod tests {
         let callback = router.register(WlInterface::Callback).unwrap();
         peer.write_all(&msg(
             callback,
-            WLCallbackEvents::Done as u16,
+            WlCallbackEvents::Done as u16,
             &0u32.to_ne_bytes(),
         ))
         .unwrap();
@@ -422,7 +421,7 @@ mod tests {
 
         router
             .dispatch_messages(&mut stream, |event| {
-                if matches!(event, WLEvent::SyncDone) {
+                if matches!(event, WlEvent::SyncDone) {
                     ControlFlow::Break(())
                 } else {
                     ControlFlow::Continue(())
@@ -438,8 +437,8 @@ mod tests {
     #[test]
     fn receive_sends_mime_with_fd_and_destroy_frees_the_offer() {
         let (a, b) = UnixStream::pair().unwrap();
-        let mut client = WLBufferedStream::new(a.into());
-        let mut compositor = WLBufferedStream::new(b.into());
+        let mut client = WlBufferedStream::new(a.into());
+        let mut compositor = WlBufferedStream::new(b.into());
         let mut router = WlMessageRouter::new();
         let offer_id: u32 = 0xff00_0000;
         router

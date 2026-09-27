@@ -1,6 +1,3 @@
-mod unix_fd_stream;
-mod wl;
-
 use std::{
     env,
     io::{Read, stdin},
@@ -9,15 +6,12 @@ use std::{
     process::exit,
 };
 
-use crate::wl::{
-    debug_println,
-    objects::{
-        wl_data_managers::DataDeviceManagerExt,
-        wl_data_source::WlDataControlSourceEvent, wl_display::WlDisplay,
-    },
-    wl_buffered_stream::WLBufferedStream,
-    wl_message_reader::WlMessageReader,
-    wl_message_router::{WLEvent, WlMessageRouter},
+use clip_for_fun::{debug_println,
+    DataDeviceManagerExt,
+    WlDataControlSourceEvent, WlDisplay,
+    WlBufferedStream,
+    WlMessageReader,
+    WlEvent, WlMessageRouter,
 };
 
 fn main() {
@@ -27,7 +21,7 @@ fn main() {
     debug_println!("Wayland socket path: {}", socket_path.display());
 
     let mut stream =
-        WLBufferedStream::connect(&socket_path).expect("Could not connect to unix socket");
+        WlBufferedStream::connect(&socket_path).expect("Could not connect to unix socket");
     debug_println!("Successfully connected to the Wayland socket");
 
     let mut display = WlDisplay::new();
@@ -53,11 +47,11 @@ fn main() {
     display.sync(&mut stream, &mut router).unwrap();
     router
         .dispatch_messages(&mut stream, |event| match event {
-            WLEvent::Registry(header, buffer) => {
+            WlEvent::Registry(header, buffer) => {
                 registry.add_interface(&header, &mut WlMessageReader::new(buffer));
                 ControlFlow::Continue(())
             }
-            WLEvent::SyncDone => ControlFlow::Break(()),
+            WlEvent::SyncDone => ControlFlow::Break(()),
             _ => ControlFlow::Continue(()),
         })
         .unwrap();
@@ -105,7 +99,7 @@ fn main() {
         router
             .dispatch_messages(&mut stream, |wl_event| {
                 match wl_event {
-                    WLEvent::DataControlSource(WlDataControlSourceEvent::Send {
+                    WlEvent::DataControlSource(WlDataControlSourceEvent::Send {
                         mime_type,
                         fd,
                     }) => {
@@ -121,7 +115,7 @@ fn main() {
                         }
                         ControlFlow::Continue(())
                     }
-                    WLEvent::DataControlSource(WlDataControlSourceEvent::Cancelled) => {
+                    WlEvent::DataControlSource(WlDataControlSourceEvent::Cancelled) => {
                         debug_println!("Received cancelled event. Exiting...");
                         ControlFlow::Break(())
                     }

@@ -1,8 +1,8 @@
 use crate::{
-    unix_fd_stream::WLFdBuffer,
+    unix_fd_stream::WlFdBuffer,
     wl::{
-        objects::{WLObject, wl_enum},
-        wl_buffered_stream::WLBufferedStream,
+        objects::{WlObject, wl_enum},
+        wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
     },
 };
@@ -10,7 +10,7 @@ use crate::{
 pub struct WlDataControlDevice {
     pub local_id: u32,
 }
-impl WLObject for WlDataControlDevice {
+impl WlObject for WlDataControlDevice {
     type Ops = WlDataControlDeviceOps;
     type Events = WlDataControlDeviceEvents;
 }
@@ -46,7 +46,7 @@ impl WlDataControlDevice {
     pub fn parse_message(
         opcode: u16,
         buffer: &[u8],
-        _fds: &mut WLFdBuffer,
+        _fds: &mut WlFdBuffer,
     ) -> std::io::Result<DataControlDeviceEvent> {
         let mut reader = WlMessageReader::new(buffer);
         match opcode {
@@ -80,7 +80,7 @@ impl WlDataControlDevice {
         }
     }
 
-    pub fn set_selection(&self, stream: &mut WLBufferedStream, source_id: u32) {
+    pub fn set_selection(&self, stream: &mut WlBufferedStream, source_id: u32) {
         let start = stream.begin_message::<WlDataControlDevice>(
             WlDataControlDeviceOps::SetSelection,
             self.local_id,

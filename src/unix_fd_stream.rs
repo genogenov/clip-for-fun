@@ -7,7 +7,7 @@ use std::{
     ptr,
 };
 
-use crate::wl::debug_println;
+use crate::debug_println;
 
 const FD_BUFFER_LEN: usize = 32;
 
@@ -53,7 +53,7 @@ const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<R
 struct AlignedCmsghdr([u8; CTRL_BUFFER_SIZE]);
 
 impl cmsghdr {
-    fn fds_into(&self, fd_buffer: &mut WLFdBuffer) -> std::io::Result<()> {
+    fn fds_into(&self, fd_buffer: &mut WlFdBuffer) -> std::io::Result<()> {
         if self.cmsg_level == SOL_SOCKET && self.cmsg_type == SCM_RIGHTS {
             let data_ptr = unsafe { (self as *const cmsghdr).add(1) as *const RawFd };
             let fd_count = (self.cmsg_len - CMSG_FD_OFFSET) / std::mem::size_of::<RawFd>();
@@ -83,7 +83,7 @@ unsafe extern "C" {
     fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
 }
 
-pub struct WLFdBuffer {
+pub struct WlFdBuffer {
     in_fds: [RawFd; FD_BUFFER_LEN],
     in_fd_count: usize,
     in_fds_cursor: usize,
@@ -93,15 +93,15 @@ pub struct WLFdBuffer {
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct WLFd(OwnedFd);
+pub struct WlFd(OwnedFd);
 
-impl std::fmt::Display for WLFd {
+impl std::fmt::Display for WlFd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.as_raw_fd())
     }
 }
 
-impl WLFd {
+impl WlFd {
     pub fn fd_write_and_close(self, data: &[u8]) -> std::io::Result<()> {
         let mut bytes_written = 0;
         let mut zero_retry_count = 0;
@@ -139,7 +139,7 @@ impl WLFd {
     }
 }
 
-impl WLFdBuffer {
+impl WlFdBuffer {
     pub fn new() -> Self {
         Self {
             in_fds: [0; FD_BUFFER_LEN],
@@ -150,7 +150,7 @@ impl WLFdBuffer {
         }
     }
 
-    pub fn pop_last_in_fd(&mut self) -> Option<WLFd> {
+    pub fn pop_last_in_fd(&mut self) -> Option<WlFd> {
         // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
         if self.in_fd_count == 0 {
             return None;
@@ -158,7 +158,7 @@ impl WLFdBuffer {
         let fd = self.in_fds[self.in_fds_cursor];
         self.in_fds_cursor = (self.in_fds_cursor + 1) % self.in_fds.len();
         self.in_fd_count -= 1;
-        unsafe { Some(WLFd(OwnedFd::from_raw_fd(fd))) }
+        unsafe { Some(WlFd(OwnedFd::from_raw_fd(fd))) }
     }
 
     fn push_in_fds(&mut self, fds: &[RawFd]) -> std::io::Result<()> {
@@ -218,7 +218,7 @@ impl UnixFdStream {
     pub fn read(
         &mut self,
         buffer: &mut [u8],
-        fd_buffer: &mut WLFdBuffer,
+        fd_buffer: &mut WlFdBuffer,
     ) -> std::io::Result<usize> {
         let mut iovec = iovec {
             iov_base: buffer.as_mut_ptr(),
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn in_fds_pop_in_fifo_order_across_wraparound() {
-        let mut buf = WLFdBuffer::new();
+        let mut buf = WlFdBuffer::new();
         // 3 does not divide FD_BUFFER_LEN, so some pushes straddle the wrap point.
         for _ in 0..FD_BUFFER_LEN {
             let fds: [RawFd; 3] = std::array::from_fn(|_| dev_null());
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn in_fds_overflow_is_an_error() {
-        let mut buf = WLFdBuffer::new();
+        let mut buf = WlFdBuffer::new();
         // Placeholders are never popped, so nothing tries to close them.
         buf.push_in_fds(&[-1; FD_BUFFER_LEN]).unwrap();
         assert!(buf.push_in_fds(&[-1]).is_err());

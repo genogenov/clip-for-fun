@@ -1,12 +1,12 @@
 use crate::wl::{
     objects::{
-        NoEvents, WLObject,
+        NoEvents, WlObject,
         wl_data_control_device::WlDataControlDevice,
         wl_data_source::WlDataControlSource,
         wl_enum,
         wl_registry::{BoundInterface, RegistryInterface},
     },
-    wl_buffered_stream::WLBufferedStream,
+    wl_buffered_stream::WlBufferedStream,
     wl_message_router::{WlInterface, WlMessageRouter},
 };
 
@@ -15,7 +15,7 @@ pub trait DataDeviceManagerExt {
 
     fn get_data_device(
         &self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         router: &mut WlMessageRouter,
         seat_id: u32,
     ) -> std::io::Result<WlDataControlDevice> {
@@ -34,7 +34,7 @@ pub trait DataDeviceManagerExt {
 
     fn create_data_source(
         &self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         router: &mut WlMessageRouter,
     ) -> std::io::Result<WlDataControlSource> {
         let data_source_start = stream.begin_message::<WlDataDeviceManager>(
@@ -52,7 +52,7 @@ pub trait DataDeviceManagerExt {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExtDataControlManagerV1;
-impl WLObject for ExtDataControlManagerV1 {
+impl WlObject for ExtDataControlManagerV1 {
     type Ops = ExtDataControlManagerOps;
     type Events = NoEvents;
 }
@@ -66,7 +66,7 @@ wl_enum! {
 
 #[derive(Debug)]
 pub struct ZwlrDataControlManagerV1;
-impl WLObject for ZwlrDataControlManagerV1 {
+impl WlObject for ZwlrDataControlManagerV1 {
     type Ops = ZwlrDataControlManagerOps;
     type Events = NoEvents;
 }
@@ -80,7 +80,7 @@ wl_enum! {
 
 #[derive(Debug)]
 pub struct WlDataDeviceManager;
-impl WLObject for WlDataDeviceManager {
+impl WlObject for WlDataDeviceManager {
     type Ops = WlDataDeviceManagerOps;
     type Events = WlDataDeviceManagerEvents;
 }

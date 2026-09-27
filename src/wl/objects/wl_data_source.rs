@@ -1,8 +1,8 @@
 use crate::{
-    unix_fd_stream::{WLFd, WLFdBuffer},
+    unix_fd_stream::{WlFd, WlFdBuffer},
     wl::{
-        objects::{WLObject, wl_enum},
-        wl_buffered_stream::WLBufferedStream,
+        objects::{WlObject, wl_enum},
+        wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
     },
 };
@@ -11,7 +11,7 @@ pub struct WlDataControlSource {
     pub local_id: u32,
 }
 
-impl WLObject for WlDataControlSource {
+impl WlObject for WlDataControlSource {
     type Ops = WlDataControlSourceOps;
     type Events = WlDataControlSourceEvents;
 }
@@ -29,12 +29,12 @@ wl_enum! {
 }
 
 pub enum WlDataControlSourceEvent<'a> {
-    Send { mime_type: &'a [u8], fd: WLFd },
+    Send { mime_type: &'a [u8], fd: WlFd },
     Cancelled,
 }
 
 impl WlDataControlSource {
-    pub fn offer(&self, stream: &mut WLBufferedStream, mime_type: &str) {
+    pub fn offer(&self, stream: &mut WlBufferedStream, mime_type: &str) {
         let bind_start = stream
             .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Offer, self.local_id);
         stream.pack_str(mime_type);
@@ -44,7 +44,7 @@ impl WlDataControlSource {
     pub fn parse_message<'a>(
         opcode: u16,
         buffer: &'a [u8],
-        fds: &mut WLFdBuffer,
+        fds: &mut WlFdBuffer,
     ) -> std::io::Result<WlDataControlSourceEvent<'a>> {
         if opcode == WlDataControlSourceEvents::Send as u16 {
             let mut reader = WlMessageReader::new(buffer);

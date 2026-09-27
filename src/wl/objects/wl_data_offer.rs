@@ -1,10 +1,10 @@
 use std::os::fd::OwnedFd;
 
 use crate::{
-    unix_fd_stream::WLFdBuffer,
+    unix_fd_stream::WlFdBuffer,
     wl::{
-        objects::{WLObject, wl_enum},
-        wl_buffered_stream::WLBufferedStream,
+        objects::{WlObject, wl_enum},
+        wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
         wl_message_router::WlMessageRouter,
     },
@@ -33,7 +33,7 @@ pub enum DataControlOfferEvent<'a> {
 pub struct WlDataControlOffer {
     local_id: u32,
 }
-impl WLObject for WlDataControlOffer {
+impl WlObject for WlDataControlOffer {
     type Ops = WlDataControlOfferOps;
     type Events = WlDataControlOfferEvents;
 }
@@ -45,7 +45,7 @@ impl WlDataControlOffer {
 
     pub fn receive(
         &self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         mime: &str,
         fd: OwnedFd,
     ) -> Result<(), std::io::Error> {
@@ -59,7 +59,7 @@ impl WlDataControlOffer {
 
     pub fn destroy(
         &self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         router: &mut WlMessageRouter,
     ) -> Result<(), std::io::Error> {
         let start = stream
@@ -71,7 +71,7 @@ impl WlDataControlOffer {
     pub fn parse_message<'a>(
         opcode: u16,
         buffer: &'a [u8],
-        _fds: &mut WLFdBuffer,
+        _fds: &mut WlFdBuffer,
     ) -> std::io::Result<DataControlOfferEvent<'a>> {
         let mut reader = WlMessageReader::new(buffer);
         match opcode {

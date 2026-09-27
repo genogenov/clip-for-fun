@@ -3,6 +3,7 @@ pub mod wl_buffered_stream;
 pub mod wl_message_reader;
 pub mod wl_message_router;
 
+#[macro_export]
 macro_rules! debug_println {
     ($($arg:tt)*) => {
         #[cfg(debug_assertions)]
@@ -12,5 +13,3 @@ macro_rules! debug_println {
         }
     };
 }
-
-pub(crate) use debug_println;

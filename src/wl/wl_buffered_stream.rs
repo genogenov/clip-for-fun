@@ -1,27 +1,27 @@
 use std::{os::fd::OwnedFd, path::Path};
 
 pub type NextMessageResult<'a> =
-    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WLFdBuffer)>>;
+    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut WlFdBuffer)>>;
 
 use crate::{
-    unix_fd_stream::{UnixFdStream, WLFdBuffer},
+    unix_fd_stream::{UnixFdStream, WlFdBuffer},
     wl::{
-        objects::{MessageHeader, WLObject, WlStr},
+        objects::{MessageHeader, WlObject, WlStr},
         wl_message_router::{WlInterface, WlMessageRouter},
     },
 };
 
-pub struct WLBufferedStream {
+pub struct WlBufferedStream {
     stream: UnixFdStream,
     write_buffer: [u8; 1024],
     write_cursor: usize,
     read_buffer: [u8; 4096],
     read_cursor: usize,
     bytes_read: usize,
-    fd: WLFdBuffer,
+    fd: WlFdBuffer,
 }
 
-impl WLBufferedStream {
+impl WlBufferedStream {
     pub fn connect(socket_path: &Path) -> std::io::Result<Self> {
         Ok(Self::new(UnixFdStream::connect(socket_path)?))
     }
@@ -34,7 +34,7 @@ impl WLBufferedStream {
             read_buffer: [0u8; 4096],
             read_cursor: 0,
             bytes_read: 0,
-            fd: WLFdBuffer::new(),
+            fd: WlFdBuffer::new(),
         }
     }
 
@@ -118,7 +118,7 @@ impl WLBufferedStream {
     }
 
     #[inline(always)]
-    pub fn begin_message<T: WLObject>(&mut self, op: T::Ops, type_id: u32) -> usize {
+    pub fn begin_message<T: WlObject>(&mut self, op: T::Ops, type_id: u32) -> usize {
         let opcode: u16 = op.into();
 
         let buf = &mut self.write_buffer[self.write_cursor..self.write_cursor + 12];
@@ -190,11 +190,11 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::time::Duration;
 
-    fn stream_pair() -> (WLBufferedStream, WLBufferedStream) {
+    fn stream_pair() -> (WlBufferedStream, WlBufferedStream) {
         let (a, b) = UnixStream::pair().unwrap();
         (
-            WLBufferedStream::new(a.into()),
-            WLBufferedStream::new(b.into()),
+            WlBufferedStream::new(a.into()),
+            WlBufferedStream::new(b.into()),
         )
     }
 
@@ -315,7 +315,7 @@ mod tests {
             s.write_all(&msg[8..]).unwrap(); // body arrives later
             std::thread::sleep(std::time::Duration::from_millis(100));
         });
-        let mut stream = WLBufferedStream::connect(&path).unwrap();
+        let mut stream = WlBufferedStream::connect(&path).unwrap();
         let got = stream.read_next_message().unwrap();
         let ok = matches!(&got, Some((h, _, _)) if h.object_id == 5 && h.size == 12);
         t.join().unwrap();

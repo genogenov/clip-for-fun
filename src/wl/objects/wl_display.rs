@@ -1,6 +1,6 @@
 use crate::wl::{
-    objects::{WLObject, wl_enum, wl_registry::WlRegistry},
-    wl_buffered_stream::WLBufferedStream,
+    objects::{WlObject, wl_enum, wl_registry::WlRegistry},
+    wl_buffered_stream::WlBufferedStream,
     wl_message_reader::WlMessageReader,
     wl_message_router::{WlInterface, WlMessageRouter},
 };
@@ -45,7 +45,7 @@ impl WlDisplay {
 
     pub fn get_registry(
         &mut self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         router: &mut WlMessageRouter,
     ) -> std::io::Result<WlRegistry> {
         let registry_start =
@@ -58,7 +58,7 @@ impl WlDisplay {
 
     pub fn sync(
         &mut self,
-        stream: &mut WLBufferedStream,
+        stream: &mut WlBufferedStream,
         router: &mut WlMessageRouter,
     ) -> std::io::Result<()> {
         let sync_start = stream.begin_message::<WlDisplay>(DisplayOps::Sync, WlDisplay::TYPE_ID);
@@ -69,7 +69,7 @@ impl WlDisplay {
     }
 }
 
-impl WLObject for WlDisplay {
+impl WlObject for WlDisplay {
     type Ops = DisplayOps;
     type Events = DisplayEvents;
 }
