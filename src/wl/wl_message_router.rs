@@ -97,14 +97,14 @@ impl WlMessageRouter {
     pub fn register_server(&mut self, interface: WlInterface, id: u32) -> Result<u32> {
         if let Some(slot) = self.server_interfaces.get_mut(
             id.checked_sub(SERVER_ID_START)
-                .ok_or_else(|| Error::other(format!("Invalid server slot id {}", id)))?
+                .ok_or_else(|| Error::other(format!("Invalid server slot id {}(local array id: {})", id, (id - SERVER_ID_START))))?
                 as usize,
         ) {
             *slot = Slot::Live(interface);
             debug_println!("Registered interface {:?} at server slot {}", interface, id);
             Ok(id)
         } else {
-            Err(Error::other(format!("Invalid server slot id {}", id)))
+            Err(Error::other(format!("Invalid server slot id {}(local array id: {})", id, (id - SERVER_ID_START))))
         }
     }
 
