@@ -63,6 +63,12 @@ pub struct WlMessageRouter {
     server_interfaces: [Slot; MAX_REGISTERED_INTERFACES],
 }
 
+impl Default for WlMessageRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WlMessageRouter {
     pub fn new() -> Self {
         let mut instance = Self {
@@ -154,11 +160,8 @@ impl WlMessageRouter {
                 WlInterface::DataControlDevice => {
                     let data_control_device_event =
                         WlDataControlDevice::parse_message(header.opcode, buffer, fds)?;
-                    match data_control_device_event {
-                        DataControlDeviceEvent::DataOffer { new_id } => {
-                            self.register_server(WlInterface::DataControlOffer, new_id)?;
-                        }
-                        _ => {}
+                    if let DataControlDeviceEvent::DataOffer { new_id } = data_control_device_event {
+                        self.register_server(WlInterface::DataControlOffer, new_id)?;
                     }
                     Ok(Some(WlEvent::DataControlDevice(data_control_device_event)))
                 }

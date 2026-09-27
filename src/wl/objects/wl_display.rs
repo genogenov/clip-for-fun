@@ -9,6 +9,12 @@ pub struct WlDisplay {
     callback_id: u32,
 }
 
+impl Default for WlDisplay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WlDisplay {
     pub const TYPE_ID: u32 = 1;
 
