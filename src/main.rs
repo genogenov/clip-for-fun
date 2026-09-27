@@ -15,6 +15,7 @@ use crate::wl::{
         wl_display::WlDisplay,
     },
     wl_buffered_stream::WLBufferedStream,
+    wl_message_router::WlMessageRouter,
 };
 
 fn main() {
@@ -44,8 +45,10 @@ fn main() {
     };
     debug_println!("Input data length : {}", in_str.len());
 
-    let mut registry = display.get_registry(&mut stream).unwrap();
-    display.roundtrip_sync(&mut stream).unwrap();
+    let mut router = WlMessageRouter::new();
+
+    let mut registry = display.get_registry(&mut stream, &mut router).unwrap();
+    display.roundtrip_sync(&mut stream, &mut router).unwrap();
     display
         .dispatch_messages(&mut stream, |header, reader, _| {
             registry.add_interface(header, reader);
@@ -63,14 +66,18 @@ fn main() {
         );
 
         let mgr_local = registry
-            .bind(&mut stream, ext_data_control_manager)
+            .bind(&mut stream, &mut router, ext_data_control_manager)
             .unwrap();
         let seat_local = registry
-            .bind(&mut stream, registry.wl_seat.unwrap())
+            .bind(&mut stream, &mut router, registry.wl_seat.unwrap())
             .unwrap();
 
-        let local_data_device = mgr_local.get_data_device(&mut stream, seat_local.local_id);
-        let mut data_source = mgr_local.create_data_source(&mut stream);
+        let local_data_device = mgr_local
+            .get_data_device(&mut stream, &mut router, seat_local.local_id)
+            .unwrap();
+        let mut data_source = mgr_local
+            .create_data_source(&mut stream, &mut router)
+            .unwrap();
         data_source.offer(&mut stream, "text/plain");
         data_source.offer(&mut stream, "text/plain;charset=utf-8");
 
@@ -86,7 +93,7 @@ fn main() {
 
         debug_println!("Read input data: {:?}", in_str);
 
-        display.roundtrip_sync(&mut stream).unwrap();
+        display.roundtrip_sync(&mut stream, &mut router).unwrap();
 
         loop {
             display

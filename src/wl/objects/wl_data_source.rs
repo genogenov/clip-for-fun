@@ -44,7 +44,7 @@ impl WlDataControlSource {
     }
 
     pub fn parse_message<'a>(
-        &mut self,
+        &self,
         header: &MessageHeader,
         reader: &'a mut WlMessageReader,
         fds: &mut WLFdBuffer,

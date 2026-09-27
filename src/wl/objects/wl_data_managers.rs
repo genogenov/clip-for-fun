@@ -7,36 +7,46 @@ use crate::wl::{
         wl_registry::{BoundInterface, RegistryInterface},
     },
     wl_buffered_stream::WLBufferedStream,
+    wl_message_router::{WlInterface, WlMessageRouter},
 };
 
 pub trait DataDeviceManagerExt {
     fn manager_id(&self) -> u32;
 
-    fn get_data_device(&self, stream: &mut WLBufferedStream, seat_id: u32) -> WlDataControlDevice {
+    fn get_data_device(
+        &self,
+        stream: &mut WLBufferedStream,
+        router: &mut WlMessageRouter,
+        seat_id: u32,
+    ) -> std::io::Result<WlDataControlDevice> {
         let data_device_start = stream.begin_message::<WlDataDeviceManager>(
             WlDataDeviceManagerOps::GetDataDevice,
             self.manager_id(),
         );
-        let data_device_id = stream.pack_new_object_id();
+        let data_device_id = stream.pack_new_object_id(router, WlInterface::DataControlDevice)?;
         stream.pack_u32(seat_id);
         stream.end_message(data_device_start);
 
-        WlDataControlDevice {
+        Ok(WlDataControlDevice {
             local_id: data_device_id,
-        }
+        })
     }
 
-    fn create_data_source(&self, stream: &mut WLBufferedStream) -> WlDataControlSource {
+    fn create_data_source(
+        &self,
+        stream: &mut WLBufferedStream,
+        router: &mut WlMessageRouter,
+    ) -> std::io::Result<WlDataControlSource> {
         let data_source_start = stream.begin_message::<WlDataDeviceManager>(
             WlDataDeviceManagerOps::CreateDataSource,
             self.manager_id(),
         );
-        let data_source_id = stream.pack_new_object_id();
+        let data_source_id = stream.pack_new_object_id(router, WlInterface::DataControlSource)?;
         stream.end_message(data_source_start);
 
-        WlDataControlSource {
+        Ok(WlDataControlSource {
             local_id: data_source_id,
-        }
+        })
     }
 }
 

@@ -5,7 +5,10 @@ pub type NextMessageResult<'a> =
 
 use crate::{
     unix_fd_stream::{UnixFdStream, WLFdBuffer},
-    wl::objects::{MessageHeader, WLObject, WlStr},
+    wl::{
+        objects::{MessageHeader, WLObject, WlStr},
+        wl_message_router::{WlInterface, WlMessageRouter},
+    },
 };
 
 pub struct WLBufferedStream {
@@ -16,7 +19,6 @@ pub struct WLBufferedStream {
     read_cursor: usize,
     bytes_read: usize,
     fd: WLFdBuffer,
-    pub(crate) current_object_id: u32,
 }
 
 impl WLBufferedStream {
@@ -32,7 +34,6 @@ impl WLBufferedStream {
             read_buffer: [0u8; 4096],
             read_cursor: 0,
             bytes_read: 0,
-            current_object_id: 1,
             fd: WLFdBuffer::new(),
         }
     }
@@ -115,10 +116,14 @@ impl WLBufferedStream {
     }
 
     #[inline(always)]
-    pub fn pack_new_object_id(&mut self) -> u32 {
-        self.current_object_id += 1;
-        self.pack_u32(self.current_object_id);
-        self.current_object_id
+    pub fn pack_new_object_id(
+        &mut self,
+        router: &mut WlMessageRouter,
+        interface: WlInterface,
+    ) -> std::io::Result<u32> {
+        let new_object_id = router.register(interface)?; // Example interface, replace with actual
+        self.pack_u32(new_object_id);
+        Ok(new_object_id)
     }
 
     #[inline(always)]

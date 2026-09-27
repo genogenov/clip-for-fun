@@ -6,6 +6,7 @@ use crate::wl::objects::wl_data_managers::{
     ZwlrDataControlManager, ZwlrDataControlManagerV1,
 };
 use crate::wl::wl_message_reader::WlMessageReader;
+use crate::wl::wl_message_router::{WlInterface, WlMessageRouter};
 use crate::wl::{
     objects::{MessageHeader, WLObject, WlStr, wl_enum, wl_str_bytes},
     wl_buffered_stream::WLBufferedStream,
@@ -19,6 +20,7 @@ where
     pub global_name: u32,
     pub version: u32,
     pub interface_name: &'static WlStr,
+    pub interface: WlInterface,
     _marker: PhantomData<I>,
 }
 
@@ -115,6 +117,7 @@ impl WlRegistry {
     pub fn bind<I>(
         &self,
         stream: &mut WLBufferedStream,
+        router: &mut WlMessageRouter,
         interface: RegistryInterface<I>,
     ) -> std::io::Result<BoundInterface<I>>
     where
@@ -124,7 +127,7 @@ impl WlRegistry {
         stream.pack_u32(interface.global_name);
         stream.pack_wl_str(interface.interface_name);
         stream.pack_u32(interface.version);
-        let binding_id = stream.pack_new_object_id();
+        let binding_id = stream.pack_new_object_id(router, interface.interface)?;
         stream.end_message(bind_start);
         Ok(BoundInterface::<I>::new(binding_id))
     }
@@ -145,6 +148,7 @@ impl WlRegistry {
                         global_name,
                         version,
                         interface_name: &WlRegistry::WL_DATA_DEVICE_MANAGER,
+                        interface: WlInterface::DataDeviceManager,
                         _marker: PhantomData,
                     });
                     return Some(());
@@ -154,6 +158,7 @@ impl WlRegistry {
                         Some(RegistryInterface::<ZwlrDataControlManagerV1> {
                             global_name,
                             version,
+                            interface: WlInterface::ZwlrDataControlManager,
                             interface_name: &WlRegistry::ZWLR_DATA_CONTROL_MANAGER_V1,
                             _marker: PhantomData,
                         });
@@ -165,6 +170,7 @@ impl WlRegistry {
                             global_name,
                             version,
                             interface_name: &WlRegistry::EXT_DATA_CONTROL_MANAGER_V1,
+                            interface: WlInterface::ExtDataControlManager,
                             _marker: PhantomData,
                         });
                     return Some(());
@@ -173,6 +179,7 @@ impl WlRegistry {
                     self.wl_seat = Some(RegistryInterface::<WlSeat> {
                         global_name,
                         version,
+                        interface: WlInterface::Seat,
                         interface_name: &WlRegistry::WL_SEAT,
                         _marker: PhantomData,
                     });
