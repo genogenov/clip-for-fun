@@ -10,7 +10,7 @@ use clip_for_fun::{
     BoundInterface, DataControlDeviceEvent, DataControlOfferEvent, DataDeviceManagerExt,
     ExtDataControlManagerV1, FdWriteAndClose, WlBufferedStream, WlDataControlDevice,
     WlDataControlOffer, WlDataControlSourceEvent, WlDisplay,
-    WlEvent::{self, DataControlOffer},
+    WlEvent::{self},
     WlMessageReader, WlMessageRouter, WlSeat, debug_println,
 };
 
@@ -18,7 +18,7 @@ enum OperationMode {
     Copy { input: Vec<u8> },
     Paste,
 }
-const PREFERRED_MIME_TYPES_STR: [&'static str; 6] = [
+const PREFERRED_MIME_TYPES_STR: [&str; 6] = [
     "text/plain;charset=utf-8",
     "UTF8_STRING",
     "text/plain",
@@ -27,7 +27,7 @@ const PREFERRED_MIME_TYPES_STR: [&'static str; 6] = [
     "text/html",
 ];
 
-const PREFERRED_MIME_TYPES: [&'static [u8]; 6] = [
+const PREFERRED_MIME_TYPES: [&[u8]; 6] = [
     PREFERRED_MIME_TYPES_STR[0].as_bytes(),
     PREFERRED_MIME_TYPES_STR[1].as_bytes(),
     PREFERRED_MIME_TYPES_STR[2].as_bytes(),
@@ -51,7 +51,7 @@ fn main() {
     let mut display = WlDisplay::new();
     let mut router = WlMessageRouter::new();
 
-    let (mgr_local, seat_local, local_data_device) =
+    let (mgr_local, _seat_local, local_data_device) =
         setup_wl_registry(&mut display, &mut stream, &mut router).unwrap();
 
     match mode {
@@ -153,7 +153,7 @@ fn main() {
                         debug_println!(
                             "Received DataControlOffer with id {} and mime_type {:?}",
                             id,
-                            String::from_utf8_lossy(&mime)
+                            String::from_utf8_lossy(mime)
                         );
 
                         let Some(rank) = PREFERRED_MIME_TYPES.iter().position(|p| p == &mime)
@@ -216,7 +216,7 @@ fn main() {
                 let write_result = std::io::copy(&mut reader, &mut std::io::stdout().lock());
 
                 match write_result {
-                    Ok(_) => return,
+                    Ok(_) => (),
                     Err(e) if e.kind() == ErrorKind::BrokenPipe => {
                         exit(0);
                     }
@@ -236,8 +236,8 @@ fn main() {
 #[inline(always)]
 fn setup_wl_registry(
     display: &mut WlDisplay,
-    mut stream: &mut WlBufferedStream,
-    mut router: &mut WlMessageRouter,
+    stream: &mut WlBufferedStream,
+    router: &mut WlMessageRouter,
 ) -> Result<
     (
         BoundInterface<ExtDataControlManagerV1>,
@@ -246,9 +246,9 @@ fn setup_wl_registry(
     ),
     std::io::Error,
 > {
-    let mut registry = display.get_registry(&mut stream, &mut router).unwrap();
-    display.sync(&mut stream, &mut router).unwrap();
-    router.dispatch_messages(&mut stream, |event| match event {
+    let mut registry = display.get_registry(stream, router).unwrap();
+    display.sync(stream, router).unwrap();
+    router.dispatch_messages(stream, |event| match event {
         WlEvent::Registry(header, buffer) => {
             registry.add_interface(&header, &mut WlMessageReader::new(buffer));
             ControlFlow::Continue(())
@@ -267,17 +267,16 @@ fn setup_wl_registry(
             ext_data_control_manager.version
         );
 
-        let mgr_local = registry.bind(&mut stream, &mut router, ext_data_control_manager)?;
+        let mgr_local = registry.bind(stream, router, ext_data_control_manager)?;
         let seat_local = registry.bind(
-            &mut stream,
-            &mut router,
+            stream,
+            router,
             registry.wl_seat.ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "wl_seat not found")
             })?,
         )?;
 
-        let local_data_device =
-            mgr_local.get_data_device(&mut stream, &mut router, seat_local.local_id)?;
+        let local_data_device = mgr_local.get_data_device(stream, router, seat_local.local_id)?;
 
         debug_println!(
             "Bound ExtDataControlManagerV1 to local id {}, and WlSeat to local id {} and got DataDevice with local id {}",
@@ -286,7 +285,7 @@ fn setup_wl_registry(
             local_data_device.local_id
         );
 
-        display.sync(&mut stream, &mut router)?;
+        display.sync(stream, router)?;
         Ok((mgr_local, seat_local, local_data_device))
     } else {
         eprintln!("error: this compositor does not support ext_data_control_manager_v1");
