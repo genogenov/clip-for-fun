@@ -40,9 +40,9 @@ impl WlBufferedStream {
 
     pub fn read_next_message(&mut self) -> NextMessageResult<'_> {
         loop {
-            if (self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize) <= self.bytes_read {
-                let header: MessageHeader =
-                    MessageHeader::parse(&self.read_buffer, self.read_cursor);
+            if let Some(h) = self.read_buffer[self.read_cursor..self.bytes_read].first_chunk::<8>()
+            {
+                let header = MessageHeader::parse(h);
 
                 if header.size > self.read_buffer.len() as u16
                     || header.size < MessageHeader::WL_HEADER_SIZE
@@ -121,7 +121,7 @@ impl WlBufferedStream {
     pub fn begin_message<T: WlObject>(&mut self, op: T::Ops, type_id: u32) -> usize {
         let opcode: u16 = op.into();
 
-        let buf = &mut self.write_buffer[self.write_cursor..self.write_cursor + 12];
+        let buf = &mut self.write_buffer[self.write_cursor..self.write_cursor + 8];
         buf[0..4].copy_from_slice(&type_id.to_ne_bytes());
         buf[4..6].copy_from_slice(&opcode.to_ne_bytes());
 
@@ -163,8 +163,14 @@ impl WlBufferedStream {
     }
 
     #[inline(always)]
-    pub fn pack_str(&mut self, s: &str) {
+    pub fn pack_str(&mut self, s: &str) -> std::io::Result<()> {
         // we need to pack the string as len + bytes + null terminator and ensure it is 4 byte aligned. The len is the str bytes + the null terminator.
+
+        let needed = 4 + (s.len() + 1).next_multiple_of(4);
+        self.write_cursor
+            .checked_add(needed)
+            .filter(|&end_cursor| end_cursor <= self.write_buffer.len())
+            .ok_or_else(|| std::io::Error::other("message does not fit in the write buffer"))?;
         let len = s.len() as u32 + 1;
         self.pack_u32(len);
         self.write_buffer[self.write_cursor..self.write_cursor + s.len()]
@@ -176,6 +182,7 @@ impl WlBufferedStream {
         let padding = ((4 - (len % 4)) % 4) as usize;
         self.write_buffer[self.write_cursor..self.write_cursor + padding].fill(0);
         self.write_cursor += padding;
+        Ok(())
     }
 }
 
@@ -263,7 +270,7 @@ mod tests {
         let (mut s, _peer) = stream_pair();
         for text in ["", "a", "abc", "abcd", "text/plain"] {
             s.write_cursor = 0;
-            s.pack_str(text);
+            s.pack_str(text).unwrap();
             let encoded = &s.write_buffer[..s.write_cursor];
             assert_eq!(
                 encoded.len(),
@@ -277,6 +284,22 @@ mod tests {
     }
 
     #[test]
+    fn pack_str_that_does_not_fit_is_an_error_and_writes_nothing() {
+        let (mut s, _peer) = stream_pair();
+        assert!(s.pack_str(&"x".repeat(s.write_buffer.len())).is_err());
+        assert_eq!(s.write_cursor, 0);
+    }
+
+    #[test]
+    fn pack_str_that_exactly_fills_the_buffer_fits() {
+        let (mut s, _peer) = stream_pair();
+        // Length prefix (4) + text + NUL (1) == buffer length, no padding needed.
+        let text = "x".repeat(s.write_buffer.len() - 4 - 1);
+        s.pack_str(&text).unwrap();
+        assert_eq!(s.write_cursor, s.write_buffer.len());
+    }
+
+    #[test]
     fn compile_time_wl_str_matches_runtime_encoding() {
         let (mut s, _peer) = stream_pair();
         let consts = [
@@ -287,7 +310,7 @@ mod tests {
         ];
         for wl_str in &consts {
             s.write_cursor = 0;
-            s.pack_str(wl_str.str);
+            s.pack_str(wl_str.str).unwrap();
             let runtime = s.write_buffer[..s.write_cursor].to_vec();
             s.write_cursor = 0;
             s.pack_wl_str(wl_str);

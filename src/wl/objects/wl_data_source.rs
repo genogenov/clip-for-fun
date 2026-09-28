@@ -16,6 +16,7 @@ pub struct WlDataControlSource {
 impl WlObject for WlDataControlSource {
     type Ops = WlDataControlSourceOps;
     type Events = WlDataControlSourceEvents;
+    const VERSION: u32 = 1;
 }
 
 pub enum WlDataControlSourceEvents {
@@ -36,11 +37,12 @@ pub enum WlDataControlSourceEvent<'a> {
 }
 
 impl WlDataControlSource {
-    pub fn offer(&self, stream: &mut WlBufferedStream, mime_type: &str) {
+    pub fn offer(&self, stream: &mut WlBufferedStream, mime_type: &str) -> std::io::Result<()> {
         let bind_start = stream
             .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Offer, self.local_id);
-        stream.pack_str(mime_type);
+        stream.pack_str(mime_type)?;
         stream.end_message(bind_start);
+        Ok(())
     }
 
     pub fn parse_message<'a>(

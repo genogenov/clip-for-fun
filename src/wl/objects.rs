@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ptr};
+use std::fmt::Debug;
 
 pub mod wl_data_control_device;
 pub mod wl_data_managers;
@@ -10,6 +10,7 @@ pub mod wl_registry;
 pub trait WlObject {
     type Ops: Into<u16>;
     type Events;
+    const VERSION: u32;
 }
 
 pub enum NoEvents {}
@@ -28,13 +29,11 @@ pub struct MessageHeader {
 impl MessageHeader {
     pub const WL_HEADER_SIZE: u16 = 8; // 4 bytes for object ID, 2 bytes for opcode, 2 bytes for message length
 
-    pub fn parse(buffer: &[u8], offset: usize) -> Self {
-        unsafe {
-            Self {
-                object_id: ptr::read_unaligned(buffer.as_ptr().add(offset) as *const u32),
-                opcode: ptr::read_unaligned(buffer.as_ptr().add(offset + 4) as *const u16),
-                size: ptr::read_unaligned(buffer.as_ptr().add(offset + 6) as *const u16),
-            }
+    pub fn parse(h: &[u8; 8]) -> Self {
+        Self {
+            object_id: u32::from_ne_bytes([h[0], h[1], h[2], h[3]]),
+            opcode: u16::from_ne_bytes([h[4], h[5]]),
+            size: u16::from_ne_bytes([h[6], h[7]]),
         }
     }
 }

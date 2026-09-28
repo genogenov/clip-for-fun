@@ -36,6 +36,7 @@ pub struct WlDataControlOffer {
 impl WlObject for WlDataControlOffer {
     type Ops = WlDataControlOfferOps;
     type Events = WlDataControlOfferEvents;
+    const VERSION: u32 = 1;
 }
 
 impl WlDataControlOffer {
@@ -52,7 +53,7 @@ impl WlDataControlOffer {
         stream.pack_fd(fd)?;
         let start = stream
             .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Receive, self.local_id);
-        stream.pack_str(mime);
+        stream.pack_str(mime)?;
         stream.end_message(start);
         Ok(())
     }

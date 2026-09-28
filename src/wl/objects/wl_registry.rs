@@ -45,6 +45,7 @@ impl<I: WlObject> BoundInterface<I> {
 impl<I: WlObject> WlObject for BoundInterface<I> {
     type Ops = I::Ops;
     type Events = I::Events;
+    const VERSION: u32 = I::VERSION;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -52,6 +53,7 @@ pub struct WlSeat;
 impl WlObject for WlSeat {
     type Ops = WlSeatOps;
     type Events = NoEvents;
+    const VERSION: u32 = 1;
 }
 wl_enum! {
     pub enum WlSeatOps {
@@ -116,7 +118,7 @@ impl WlRegistry {
         let bind_start = stream.begin_message::<WlRegistry>(RegistryOps::Bind, self.type_id);
         stream.pack_u32(interface.global_name);
         stream.pack_wl_str(interface.interface_name);
-        stream.pack_u32(interface.version);
+        stream.pack_u32(interface.version.min(I::VERSION));
         let binding_id = stream.pack_new_object_id(router, interface.interface)?;
         stream.end_message(bind_start);
         Ok(BoundInterface::<I>::new(binding_id))
@@ -194,4 +196,52 @@ impl WlRegistry {
 impl WlObject for WlRegistry {
     type Ops = RegistryOps;
     type Events = RegistryEvents;
+    const VERSION: u32 = 1;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    // Binds over a socket pair and returns the version field the compositor would receive.
+    fn bound_version<I: WlObject>(interface: RegistryInterface<I>) -> u32 {
+        let (a, b) = UnixStream::pair().unwrap();
+        let mut client = WlBufferedStream::new(a.into());
+        let mut compositor = WlBufferedStream::new(b.into());
+        let mut router = WlMessageRouter::new();
+        WlRegistry::new(2)
+            .bind(&mut client, &mut router, interface)
+            .unwrap();
+        client.write().unwrap();
+
+        let (_, body, _) = compositor.read_next_message().unwrap().unwrap();
+        let mut r = WlMessageReader::new(body);
+        r.u32().unwrap(); // global name
+        r.str().unwrap(); // interface name
+        r.u32().unwrap()
+    }
+
+    #[test]
+    fn bind_uses_the_lower_of_server_and_implemented_version() {
+        let seat = |version| RegistryInterface::<WlSeat> {
+            global_name: 7,
+            version,
+            interface_name: &WlRegistry::WL_SEAT,
+            interface: WlInterface::Seat,
+            _marker: PhantomData,
+        };
+        let zwlr = |version| RegistryInterface::<ZwlrDataControlManagerV1> {
+            global_name: 8,
+            version,
+            interface_name: &WlRegistry::ZWLR_DATA_CONTROL_MANAGER_V1,
+            interface: WlInterface::ZwlrDataControlManager,
+            _marker: PhantomData,
+        };
+
+        assert_eq!(bound_version(seat(9)), 1);
+        assert_eq!(bound_version(zwlr(1)), 1);
+        assert_eq!(bound_version(zwlr(2)), 2);
+        assert_eq!(bound_version(zwlr(5)), 2);
+    }
 }

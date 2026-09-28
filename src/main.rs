@@ -1,7 +1,9 @@
 use std::{
     env,
+    ffi::OsString,
     io::{self, ErrorKind, Read, stdin},
     ops::ControlFlow,
+    os::unix::ffi::OsStringExt,
     path::PathBuf,
     process::ExitCode,
 };
@@ -30,13 +32,14 @@ fn main() -> ExitCode {
 }
 
 fn run() -> io::Result<()> {
-    let mode = parse_operation_mode()?;
+    let mut args: Vec<OsString> = env::args_os().collect();
+    let mode = parse_operation_mode(&mut args)?;
 
-    let runtime_dir = env::var("XDG_RUNTIME_DIR")
-        .map_err(|_| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
+    let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
 
     let socket_path = PathBuf::from(&runtime_dir)
-        .join(env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string()));
+        .join(env::var_os("WAYLAND_DISPLAY").unwrap_or_else(|| OsString::from("wayland-0")));
     log_debug!("Wayland socket path: {}", socket_path.display());
 
     let mut stream = WlBufferedStream::connect(&socket_path).map_err(|e| {
@@ -55,16 +58,11 @@ fn run() -> io::Result<()> {
 
     match mode {
         OperationMode::Copy { input } => {
-            log_debug!(
-                "Read input data: {:?}(as text: {}), length: {}",
-                input,
-                String::from_utf8_lossy(&input),
-                input.len()
-            );
+            log_debug!("Read {} bytes of input", input.len());
 
             let data_source = mgr_local.create_data_source(&mut stream, &mut router)?;
             for mime in OFFERED_TXT_MIME_TYPES {
-                data_source.offer(&mut stream, mime);
+                data_source.offer(&mut stream, mime)?;
             }
             local_data_device.set_selection(&mut stream, data_source.local_id);
 
@@ -193,48 +191,90 @@ fn setup_wl_registry(
     }
 }
 
-fn parse_operation_mode() -> Result<OperationMode, std::io::Error> {
-    let args: Vec<String> = env::args().collect();
+fn parse_operation_mode(args: &mut Vec<OsString>) -> Result<OperationMode, std::io::Error> {
+    match args.len() {
+        3 if args[1] == "--" => {
+            log_debug!("Mode is copy. Using argument after '--' as copy content");
+            Ok(OperationMode::Copy {
+                input: args.swap_remove(2).into_vec(),
+            })
+        }
+        2 if args[1] == "--paste" => {
+            log_debug!("Mode is paste.");
+            Ok(OperationMode::Paste)
+        }
+        2 => {
+            log_debug!("Mode is copy. Using argument as copy content");
 
-    if args.len() == 3 && args[1] == "--" {
-        log_debug!("Mode is copy. Using argument after '--' as copy content");
-        return Ok(OperationMode::Copy {
-            input: args[2].as_bytes().to_vec(),
-        });
-    }
-
-    if args.len() > 2 {
-        let Colors {
-            bold,
-            yellow,
-            green,
-            cyan,
-            reset,
-            ..
-        } = LOGGER.colors;
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "too many arguments\n\
+            Ok(OperationMode::Copy {
+                input: args.swap_remove(1).into_vec(),
+            })
+        }
+        1 => {
+            log_debug!("Mode is copy. Using stdin as copy content");
+            let mut input = Vec::new();
+            stdin().read_to_end(&mut input)?;
+            Ok(OperationMode::Copy { input })
+        }
+        _ => {
+            let Colors {
+                bold,
+                yellow,
+                green,
+                cyan,
+                reset,
+                ..
+            } = LOGGER.colors;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "too many arguments\n\
                  \n\
                  {bold}{yellow}Usage:{reset}\n  {green}{}{reset} [{cyan}--paste{reset} | {cyan}<text>{reset}]",
-                args[0]
-            ),
-        ));
+                    args[0].display()
+                ),
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+    fn args(list: &[&[u8]]) -> Vec<OsString> {
+        list.iter()
+            .map(|a| OsStr::from_bytes(a).to_os_string())
+            .collect()
     }
 
-    if args.len() == 2 && args[1] == "--paste" {
-        log_debug!("Mode is paste.");
-        Ok(OperationMode::Paste)
-    } else if args.len() == 2 {
-        log_debug!("Mode is copy. Using argument as copy content");
-        Ok(OperationMode::Copy {
-            input: args[1].as_bytes().to_vec(),
-        })
-    } else {
-        log_debug!("Mode is copy. Using stdin as copy content");
-        let mut input = Vec::new();
-        stdin().read_to_end(&mut input)?;
-        Ok(OperationMode::Copy { input })
+    #[test]
+    fn non_utf8_argument_is_copied_byte_for_byte() {
+        let mode = parse_operation_mode(&mut args(&[b"clip", b"\xff\xfe"]));
+        assert!(matches!(mode, Ok(OperationMode::Copy { input }) if input == b"\xff\xfe"));
+    }
+
+    #[test]
+    fn paste_flag_selects_paste() {
+        let mode = parse_operation_mode(&mut args(&[b"clip", b"--paste"]));
+        assert!(matches!(mode, Ok(OperationMode::Paste)));
+    }
+
+    #[test]
+    fn double_dash_copies_text_that_looks_like_a_flag() {
+        let mode = parse_operation_mode(&mut args(&[b"clip", b"--", b"--paste"]));
+        assert!(matches!(mode, Ok(OperationMode::Copy { input }) if input == b"--paste"));
+    }
+
+    #[test]
+    fn too_many_arguments_is_an_error() {
+        for list in [
+            &[&b"clip"[..], b"a", b"b"][..],
+            &[b"clip", b"a", b"b", b"c"],
+        ] {
+            let mode = parse_operation_mode(&mut args(list));
+            assert!(matches!(mode, Err(e) if e.kind() == ErrorKind::InvalidInput));
+        }
     }
 }

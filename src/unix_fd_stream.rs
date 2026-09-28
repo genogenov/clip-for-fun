@@ -2,16 +2,15 @@ use std::{
     fs::File,
     io::{ErrorKind, Write},
     os::{
-        fd::{FromRawFd, IntoRawFd, OwnedFd, RawFd},
+        fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
         unix::net::UnixStream,
     },
     path::Path,
     ptr,
 };
 
-use crate::log_debug;
-
 const FD_BUFFER_LEN: usize = 32;
+const USIZE: usize = size_of::<usize>();
 
 #[repr(C)]
 struct iovec {
@@ -45,6 +44,8 @@ const SOL_SOCKET: i32 = 1;
 const SOL_SOCKET: i32 = 0xffff;
 
 const SCM_RIGHTS: i32 = 0x01;
+
+const MSG_CTRUNC: i32 = 0x8;
 const MSG_CMSG_CLOEXEC: i32 = 0x40000000;
 
 const CMSG_FD_OFFSET: usize = cmsg_align(std::mem::size_of::<cmsghdr>());
@@ -53,20 +54,6 @@ const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<R
 
 #[repr(C, align(8))]
 struct AlignedCmsghdr([u8; CTRL_BUFFER_SIZE]);
-
-impl cmsghdr {
-    fn fds_into(&self, fd_buffer: &mut FdBuffer) -> std::io::Result<()> {
-        if self.cmsg_level == SOL_SOCKET && self.cmsg_type == SCM_RIGHTS {
-            let data_ptr = unsafe { (self as *const cmsghdr).add(1) as *const RawFd };
-            let fd_count = (self.cmsg_len - CMSG_FD_OFFSET) / std::mem::size_of::<RawFd>();
-            let data_slice = unsafe { std::slice::from_raw_parts(data_ptr, fd_count) };
-            fd_buffer.push_in_fds(data_slice)?;
-
-            log_debug!("Received {} file descriptors", fd_count);
-        }
-        Ok(())
-    }
-}
 
 const fn cmsg_align(len: usize) -> usize {
     let align_to = std::mem::size_of::<usize>();
@@ -81,15 +68,15 @@ unsafe extern "C" {
     fn recvmsg(sockfd: RawFd, msg: *mut msghdr, flags: i32) -> isize;
     fn sendmsg(sockfd: RawFd, msg: *const msghdr, flags: i32) -> isize;
     // fn pipe2(fd: *mut RawFd, flags: i32) -> RawFd;
-    fn close(fd: RawFd) -> i32;
+    // fn close(fd: RawFd) -> i32;
     // fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
 }
 
 pub struct FdBuffer {
-    in_fds: [RawFd; FD_BUFFER_LEN],
+    in_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
     in_fd_count: usize,
     in_fds_cursor: usize,
-    out_fds: [RawFd; FD_BUFFER_LEN],
+    out_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
     out_fd_count: usize,
 }
 
@@ -109,10 +96,10 @@ impl FdWriteAndClose for OwnedFd {
 impl FdBuffer {
     pub fn new() -> Self {
         Self {
-            in_fds: [0; FD_BUFFER_LEN],
+            in_fds: [const { None }; FD_BUFFER_LEN],
             in_fd_count: 0,
             in_fds_cursor: 0,
-            out_fds: [0; FD_BUFFER_LEN],
+            out_fds: [const { None }; FD_BUFFER_LEN],
             out_fd_count: 0,
         }
     }
@@ -122,23 +109,21 @@ impl FdBuffer {
         if self.in_fd_count == 0 {
             return None;
         }
-        let fd = self.in_fds[self.in_fds_cursor];
+        let fd = self.in_fds[self.in_fds_cursor].take();
         self.in_fds_cursor = (self.in_fds_cursor + 1) % self.in_fds.len();
         self.in_fd_count -= 1;
-        unsafe { Some(OwnedFd::from_raw_fd(fd)) }
+        fd
     }
 
-    fn push_in_fds(&mut self, fds: &[RawFd]) -> std::io::Result<()> {
+    fn push_in_fd(&mut self, fd: OwnedFd) -> std::io::Result<()> {
         // this is a ring buffer, so we need to wrap around if we reach the end of the buffer
-        if fds.len() > self.in_fds.len() - self.in_fd_count {
+        if self.in_fd_count >= self.in_fds.len() {
             return Err(std::io::Error::other(
                 "Not enough space in buffer for file descriptors",
             ));
         }
-        for &fd in fds {
-            self.in_fds[(self.in_fds_cursor + self.in_fd_count) % self.in_fds.len()] = fd;
-            self.in_fd_count += 1;
-        }
+        self.in_fds[(self.in_fds_cursor + self.in_fd_count) % self.in_fds.len()] = Some(fd);
+        self.in_fd_count += 1;
         Ok(())
     }
 
@@ -148,31 +133,31 @@ impl FdBuffer {
                 "Not enough space in output buffer for file descriptors",
             ));
         }
-        self.out_fds[self.out_fd_count] = fd.into_raw_fd();
+        self.out_fds[self.out_fd_count] = Some(fd);
         self.out_fd_count += 1;
         Ok(())
     }
 
-    pub fn peek_out_fds(&mut self) -> &[RawFd] {
+    pub fn peek_out_fds(&self) -> &[Option<OwnedFd>] {
         &self.out_fds[..self.out_fd_count]
     }
 
     pub fn clear_and_close_out_fds(&mut self) {
-        for i in 0..self.out_fd_count {
-            unsafe { close(self.out_fds[i]) };
+        for slot in &mut self.out_fds[..self.out_fd_count] {
+            *slot = None;
         }
         self.out_fd_count = 0;
     }
 }
 
 pub struct UnixFdStream {
-    stream_fd: RawFd,
+    stream_fd: OwnedFd,
 }
 
 impl From<UnixStream> for UnixFdStream {
     fn from(stream: UnixStream) -> Self {
         Self {
-            stream_fd: stream.into_raw_fd(),
+            stream_fd: stream.into(),
         }
     }
 }
@@ -189,7 +174,6 @@ impl UnixFdStream {
         };
 
         loop {
-            // MaybeUninit ??
             let mut ctrl_buffer = AlignedCmsghdr([0u8; CTRL_BUFFER_SIZE]);
 
             let mut msg = msghdr {
@@ -202,7 +186,9 @@ impl UnixFdStream {
                 msg_flags: 0,
             };
 
-            let bytes_read_or_err = unsafe { recvmsg(self.stream_fd, &mut msg, MSG_CMSG_CLOEXEC) };
+            // SAFETY: msg points at iov/control buffers for the call; the kernel writes at most their lengths.
+            let bytes_read_or_err =
+                unsafe { recvmsg(self.stream_fd.as_raw_fd(), &mut msg, MSG_CMSG_CLOEXEC) };
 
             if bytes_read_or_err < 0 {
                 let error = std::io::Error::last_os_error();
@@ -216,44 +202,58 @@ impl UnixFdStream {
                 return Ok(0); // EOF
             }
 
-            let mut ctrl_buf_cursor = 0;
+            if msg.msg_flags & MSG_CTRUNC != 0 {
+                return Err(std::io::Error::other("Control message truncated"));
+            }
+            let mut ctrl = &ctrl_buffer.0[..msg.msg_controllen];
+            while let Some(hdr) = ctrl.first_chunk::<CMSG_FD_OFFSET>() {
+                let len = usize::from_ne_bytes(hdr[..USIZE].try_into().unwrap());
+                let level = i32::from_ne_bytes(hdr[USIZE..USIZE + 4].try_into().unwrap());
+                let kind = i32::from_ne_bytes(hdr[USIZE + 4..USIZE + 8].try_into().unwrap());
+                let data = ctrl
+                    .get(CMSG_FD_OFFSET..len)
+                    .ok_or_else(|| std::io::Error::other("Malformed control message"))?;
+                if level == SOL_SOCKET && kind == SCM_RIGHTS {
+                    // keep wrapping all incoming FDs in OwnedFd to prevent leaks
+                    // this is arguably an overkill given this will terminate the process, but adding it here for extra safety..
+                    let mut pushed = Ok(());
+                    for raw in data.as_chunks::<4>().0 {
+                        // SAFETY: the kernel just installed this fd via SCM_RIGHTS; nothing else owns it.
+                        let fd = unsafe { OwnedFd::from_raw_fd(i32::from_ne_bytes(*raw)) };
+                        if pushed.is_ok() {
+                            pushed = fd_buffer.push_in_fd(fd);
+                        }
+                    }
 
-            while ctrl_buf_cursor < msg.msg_controllen {
-                let cmsg = unsafe { &mut *(msg.msg_control.add(ctrl_buf_cursor) as *mut cmsghdr) };
-                if cmsg.cmsg_len == 0 {
-                    return Err(std::io::Error::other(
-                        "Invalid control message with zero length",
-                    ));
+                    pushed?;
                 }
-                cmsg.fds_into(fd_buffer)?;
-                ctrl_buf_cursor += cmsg_align(cmsg.cmsg_len);
+                ctrl = ctrl.get(cmsg_align(len)..).unwrap_or(&[]);
             }
 
             return Ok(bytes_read_or_err as usize);
         }
     }
 
-    pub fn write(&mut self, buff: &[u8], fds: &[RawFd]) -> std::io::Result<()> {
+    pub fn write(&mut self, buff: &[u8], fds: &[Option<OwnedFd>]) -> std::io::Result<()> {
         if fds.is_empty() {
             self.send_all(&mut [], buff)
         } else if fds.len() > FD_BUFFER_LEN {
             Err(std::io::Error::other("Too many file descriptors to send"))
         } else {
-            let fds_bytes_len: usize = std::mem::size_of_val(fds);
+            let fds_bytes_len: usize = fds.len() * std::mem::size_of::<RawFd>();
             let cmsg_space = cmsg_space(fds_bytes_len);
             let mut ctrl_buffer: AlignedCmsghdr = AlignedCmsghdr([0u8; CTRL_BUFFER_SIZE]);
-            let base_ptr = ctrl_buffer.0.as_mut_ptr();
-            unsafe {
-                base_ptr.cast::<cmsghdr>().write(cmsghdr {
-                    cmsg_len: CMSG_FD_OFFSET + (fds_bytes_len),
-                    cmsg_level: SOL_SOCKET,
-                    cmsg_type: SCM_RIGHTS,
-                });
-                ptr::copy_nonoverlapping(
-                    fds.as_ptr().cast(),
-                    base_ptr.add(CMSG_FD_OFFSET),
-                    fds_bytes_len,
-                );
+            let buf = &mut ctrl_buffer.0;
+            buf[..USIZE].copy_from_slice(&(CMSG_FD_OFFSET + fds_bytes_len).to_ne_bytes());
+            buf[USIZE..USIZE + 4].copy_from_slice(&SOL_SOCKET.to_ne_bytes());
+            buf[USIZE + 4..USIZE + 8].copy_from_slice(&SCM_RIGHTS.to_ne_bytes());
+            for (dst, fd) in buf[CMSG_FD_OFFSET..]
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(fds.iter().flatten().map(AsRawFd::as_raw_fd))
+            {
+                dst.copy_from_slice(&fd.to_ne_bytes());
             }
 
             self.send_all(&mut ctrl_buffer.0[..cmsg_space], buff)
@@ -285,7 +285,8 @@ impl UnixFdStream {
                 msg_flags: 0,
             };
 
-            let bytes_sent_or_err = unsafe { sendmsg(self.stream_fd, &msg, 0) };
+            // SAFETY: msg, iov and control point at buffers for the call; the kernel only reads them.
+            let bytes_sent_or_err = unsafe { sendmsg(self.stream_fd.as_raw_fd(), &msg, 0) };
 
             if bytes_sent_or_err < 0 {
                 let error = std::io::Error::last_os_error();
@@ -311,30 +312,33 @@ impl UnixFdStream {
     }
 }
 
-impl Drop for UnixFdStream {
-    fn drop(&mut self) {
-        unsafe { close(self.stream_fd) };
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs::File, os::fd::AsRawFd};
+    use std::{io::Read, time::Duration};
 
-    fn dev_null() -> RawFd {
-        File::open("/dev/null").unwrap().into_raw_fd()
+    fn dev_null() -> OwnedFd {
+        File::open("/dev/null").unwrap().into()
+    }
+
+    // Reads EOF only once every other handle to the peer socket is closed.
+    fn assert_peer_closed(mut keep: UnixStream) {
+        keep.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        assert_eq!(keep.read(&mut [0u8; 1]).unwrap(), 0);
     }
 
     #[test]
     fn in_fds_pop_in_fifo_order_across_wraparound() {
         let mut buf = FdBuffer::new();
-        // 3 does not divide FD_BUFFER_LEN, so some pushes straddle the wrap point.
+        // 3 does not divide FD_BUFFER_LEN, so some rounds straddle the wrap point.
         for _ in 0..FD_BUFFER_LEN {
-            let fds: [RawFd; 3] = std::array::from_fn(|_| dev_null());
-            buf.push_in_fds(&fds).unwrap();
-            for expected in fds {
-                assert_eq!(buf.pop_last_in_fd().unwrap().as_raw_fd(), expected);
+            let fds: [OwnedFd; 3] = std::array::from_fn(|_| dev_null());
+            let expected = fds.each_ref().map(|fd| fd.as_raw_fd());
+            for fd in fds {
+                buf.push_in_fd(fd).unwrap();
+            }
+            for raw in expected {
+                assert_eq!(buf.pop_last_in_fd().unwrap().as_raw_fd(), raw);
             }
         }
         assert!(buf.pop_last_in_fd().is_none());
@@ -343,15 +347,29 @@ mod tests {
     #[test]
     fn in_fds_overflow_is_an_error() {
         let mut buf = FdBuffer::new();
-        // Placeholders are never popped, so nothing tries to close them.
-        buf.push_in_fds(&[-1; FD_BUFFER_LEN]).unwrap();
-        assert!(buf.push_in_fds(&[-1]).is_err());
+        for _ in 0..FD_BUFFER_LEN {
+            buf.push_in_fd(dev_null()).unwrap();
+        }
+        assert!(buf.push_in_fd(dev_null()).is_err());
+    }
+
+    #[test]
+    fn queued_fds_are_closed_when_the_buffer_is_dropped() {
+        let (keep_in, queued_in) = UnixStream::pair().unwrap();
+        let (keep_out, queued_out) = UnixStream::pair().unwrap();
+        let mut buf = FdBuffer::new();
+        buf.push_in_fd(queued_in.into()).unwrap();
+        buf.push_out_fd(queued_out.into()).unwrap();
+        drop(buf);
+        assert_peer_closed(keep_in);
+        assert_peer_closed(keep_out);
     }
 
     #[test]
     fn write_rejects_more_fds_than_the_control_buffer_holds() {
         let (a, _b) = UnixStream::pair().unwrap();
         let mut stream = UnixFdStream::from(a);
-        assert!(stream.write(b"x", &[-1; FD_BUFFER_LEN + 1]).is_err());
+        let fds: Vec<Option<OwnedFd>> = (0..=FD_BUFFER_LEN).map(|_| Some(dev_null())).collect();
+        assert!(stream.write(b"x", &fds).is_err());
     }
 }

@@ -1,3 +1,5 @@
+#![warn(clippy::undocumented_unsafe_blocks)]
+
 #[doc(hidden)]
 mod log_writer;
 mod unix_fd_stream;

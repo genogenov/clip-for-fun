@@ -55,6 +55,7 @@ pub struct ExtDataControlManagerV1;
 impl WlObject for ExtDataControlManagerV1 {
     type Ops = ExtDataControlManagerOps;
     type Events = NoEvents;
+    const VERSION: u32 = 1;
 }
 wl_enum! {
     pub enum ExtDataControlManagerOps {
@@ -69,6 +70,7 @@ pub struct ZwlrDataControlManagerV1;
 impl WlObject for ZwlrDataControlManagerV1 {
     type Ops = ZwlrDataControlManagerOps;
     type Events = NoEvents;
+    const VERSION: u32 = 2;
 }
 wl_enum! {
     pub enum ZwlrDataControlManagerOps {
@@ -83,6 +85,7 @@ pub struct WlDataDeviceManager;
 impl WlObject for WlDataDeviceManager {
     type Ops = WlDataDeviceManagerOps;
     type Events = WlDataDeviceManagerEvents;
+    const VERSION: u32 = 1;
 }
 wl_enum! {
     pub enum WlDataDeviceManagerOps {

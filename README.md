@@ -14,7 +14,7 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 
 ## Todo
 - Run in the background after copying, like `wl-copy`
-- Benchmark agains other popular copy/paste/clip history managers
+- Benchmark against other popular copy/paste/clip history managers
 - Watch mode + history support
 - CLI flags (`--type`, `--primary`)
 - MIME type guessing without spawning helpers like `xdg-mime`: on copy from the stdin file name or magic bytes (`clip-for-fun < shot.png` offers `image/png`), on paste from the stdout file name (`clip-for-fun --paste > shot.png` requests `image/png`)
