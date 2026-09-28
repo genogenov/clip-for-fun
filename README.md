@@ -1,15 +1,14 @@
 # Clip-For-Fun - a Wayland Clipboard Manager (for fun)
 This is a pure Rust, zero dependency implementation of a clipboard manager (copying and pasting, no history)\
-It is very much a work in progress\
-The reason this project exists is 99.9% for practicing my Rust skills, and gaining some low level knowledge about Linux, Wayland, syscalls, etc.
+It is very much a work in progress.
 
-No libc crate or wayland libraries - it talks the Wayland wire protocol directly over the unix socket, with my own bindings for `sendmsg`/`recvmsg`.
+No libc crate or wayland libraries - it talks the Wayland wire protocol directly over the unix socket, with custom bindings for `sendmsg`/`recvmsg`.
 
 ## What works
 - Copy from an argument or stdin - Ctrl+V in other apps works, including X11 apps under Xwayland (`UTF8_STRING`, `STRING`, `TEXT`)
-- Paste to stdout (`--paste`), picking the best text MIME type the clipboard owner offers
+- Paste to stdout (`--paste`), picking the best text MIME type the clipboard owner offers, streamed zero-copy with `splice` (via std::io::copy) when stdout is a file or pipe
 - Wayland wire format (headers, ints, strings, new_id)
-- Registry + binding `wl_seat` and `ext_data_control_manager_v1`
+- Registry + binding `wl_seat` and `ext_data_control_manager_v1` at the lower of the server's and the implemented version
 - Sending and receiving fds over the socket (`SCM_RIGHTS`)
 
 ## Todo
@@ -19,7 +18,7 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 - CLI flags (`--type`, `--primary`)
 - MIME type guessing without spawning helpers like `xdg-mime`: on copy from the stdin file name or magic bytes (`clip-for-fun < shot.png` offers `image/png`), on paste from the stdout file name (`clip-for-fun --paste > shot.png` requests `image/png`)
 - Append a trailing `\n` on paste only when stdout is a terminal, the MIME type is text, and the data doesn't already end with one (never for files or pipes), with `-n`/`--no-newline` to suppress
-- Zero-copy paste with `splice` (pipe to stdout without passing through user space)
+- Zero-copy serving on copy with `vmsplice`, and bigger pipes (`F_SETPIPE_SZ`) for large transfers
 - Fallback to `zwlr_data_control_manager_v1`
 
 ## Usage
@@ -42,5 +41,7 @@ cat file.txt | ./target/release/clip-for-fun
 ```
 
 Then paste anywhere. The process stays alive until something else is copied, since on Wayland the owner of the clipboard has to serve the data itself.
+
+`--paste` only handles text for now and exits with an error if the clipboard has no text type.
 
 For debug output, build without `--release` and run `./target/debug/clip-for-fun` instead.
