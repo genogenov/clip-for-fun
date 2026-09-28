@@ -11,20 +11,16 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 - Wayland wire format (headers, ints, strings, new_id)
 - Registry + binding `wl_seat` and `ext_data_control_manager_v1`
 - Sending and receiving fds over the socket (`SCM_RIGHTS`)
-- Reassembling messages split across socket reads
-- Object ID tables with typed event routing, for both client-created and compositor-created objects
-- Error messages instead of panics; colored output only on a terminal (honors `NO_COLOR`)
-- Unit tests and CI (fmt, clippy in debug and release, tests on x86_64 and aarch64)
 
 ## Todo
-- Fallback to `zwlr_data_control_manager_v1`
 - Run in the background after copying, like `wl-copy`
+- Benchmark agains other popular copy/paste/clip history managers
+- Watch mode + history support
 - CLI flags (`--type`, `--primary`)
 - MIME type guessing without spawning helpers like `xdg-mime`: on copy from the stdin file name or magic bytes (`clip-for-fun < shot.png` offers `image/png`), on paste from the stdout file name (`clip-for-fun --paste > shot.png` requests `image/png`)
 - Append a trailing `\n` on paste only when stdout is a terminal, the MIME type is text, and the data doesn't already end with one (never for files or pipes), with `-n`/`--no-newline` to suppress
 - Zero-copy paste with `splice` (pipe to stdout without passing through user space)
-- Benchmarks against `wl-clipboard`
-- More tests
+- Fallback to `zwlr_data_control_manager_v1`
 
 ## Usage
 Needs a compositor that supports `ext_data_control_manager_v1` (developed and tested on Hyprland).
