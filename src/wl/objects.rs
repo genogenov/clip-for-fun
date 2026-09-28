@@ -13,7 +13,7 @@ pub trait WlObject {
 }
 
 pub trait WlGlobal: WlObject {
-    const VERSION: u32;
+    const MAX_VERSION: u32;
 }
 
 pub enum NoEvents {}

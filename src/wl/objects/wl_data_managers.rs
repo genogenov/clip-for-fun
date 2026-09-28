@@ -58,7 +58,7 @@ impl WlObject for ExtDataControlManagerV1 {
 }
 
 impl WlGlobal for ExtDataControlManagerV1 {
-    const VERSION: u32 = 1;
+    const MAX_VERSION: u32 = 1;
 }
 
 wl_enum! {
@@ -76,7 +76,7 @@ impl WlObject for ZwlrDataControlManagerV1 {
     type Events = NoEvents;
 }
 impl WlGlobal for ZwlrDataControlManagerV1 {
-    const VERSION: u32 = 2;
+    const MAX_VERSION: u32 = 2;
 }
 wl_enum! {
     pub enum ZwlrDataControlManagerOps {

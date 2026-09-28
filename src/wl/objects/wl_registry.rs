@@ -27,14 +27,14 @@ where
 
 pub struct BoundInterface<I>
 where
-    I: WlObject,
+    I: WlGlobal,
 {
     pub local_id: u32,
     pub version: u32,
     marker: PhantomData<I>,
 }
 
-impl<I: WlObject> BoundInterface<I> {
+impl<I: WlGlobal> BoundInterface<I> {
     pub fn new(local_id: u32, version: u32) -> Self {
         Self {
             local_id,
@@ -44,7 +44,7 @@ impl<I: WlObject> BoundInterface<I> {
     }
 }
 
-impl<I: WlObject> WlObject for BoundInterface<I> {
+impl<I: WlGlobal> WlObject for BoundInterface<I> {
     type Ops = I::Ops;
     type Events = I::Events;
 }
@@ -56,7 +56,7 @@ impl WlObject for WlSeat {
     type Events = NoEvents;
 }
 impl WlGlobal for WlSeat {
-    const VERSION: u32 = 1;
+    const MAX_VERSION: u32 = 1;
 }
 wl_enum! {
     pub enum WlSeatOps {
@@ -119,7 +119,7 @@ impl WlRegistry {
         I: WlGlobal,
     {
         let bind_start = stream.begin_message::<WlRegistry>(RegistryOps::Bind, self.type_id);
-        let negotiated_version = interface.version.min(I::VERSION);
+        let negotiated_version = interface.version.min(I::MAX_VERSION);
         stream.pack_u32(interface.global_name);
         stream.pack_wl_str(interface.interface_name);
         stream.pack_u32(negotiated_version);
