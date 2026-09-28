@@ -92,6 +92,7 @@ fn run() -> io::Result<()> {
         }
         OperationMode::Paste => {
             log_debug!("Starting Paste loop");
+            display.sync(&mut stream, &mut router)?;
 
             let mut tracker = WlOfferTracker::new();
 
@@ -182,7 +183,6 @@ fn setup_wl_registry(
             local_data_device.local_id
         );
 
-        display.sync(stream, router)?;
         Ok((mgr_local, seat_local, local_data_device))
     } else {
         Err(std::io::Error::other(
