@@ -1,11 +1,11 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use crate::wl::objects::NoEvents;
 use crate::wl::objects::wl_data_managers::{
     DataControlManager, DataDeviceManager, ExtDataControlManagerV1, WlDataDeviceManager,
     ZwlrDataControlManager, ZwlrDataControlManagerV1,
 };
+use crate::wl::objects::{NoEvents, WlGlobal};
 use crate::wl::wl_message_reader::WlMessageReader;
 use crate::wl::wl_message_router::{WlInterface, WlMessageRouter};
 use crate::wl::{
@@ -30,13 +30,15 @@ where
     I: WlObject,
 {
     pub local_id: u32,
+    pub version: u32,
     marker: PhantomData<I>,
 }
 
 impl<I: WlObject> BoundInterface<I> {
-    pub fn new(local_id: u32) -> Self {
+    pub fn new(local_id: u32, version: u32) -> Self {
         Self {
             local_id,
+            version,
             marker: PhantomData,
         }
     }
@@ -45,7 +47,6 @@ impl<I: WlObject> BoundInterface<I> {
 impl<I: WlObject> WlObject for BoundInterface<I> {
     type Ops = I::Ops;
     type Events = I::Events;
-    const VERSION: u32 = I::VERSION;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -53,6 +54,8 @@ pub struct WlSeat;
 impl WlObject for WlSeat {
     type Ops = WlSeatOps;
     type Events = NoEvents;
+}
+impl WlGlobal for WlSeat {
     const VERSION: u32 = 1;
 }
 wl_enum! {
@@ -113,15 +116,16 @@ impl WlRegistry {
         interface: RegistryInterface<I>,
     ) -> std::io::Result<BoundInterface<I>>
     where
-        I: WlObject,
+        I: WlGlobal,
     {
         let bind_start = stream.begin_message::<WlRegistry>(RegistryOps::Bind, self.type_id);
+        let negotiated_version = interface.version.min(I::VERSION);
         stream.pack_u32(interface.global_name);
         stream.pack_wl_str(interface.interface_name);
-        stream.pack_u32(interface.version.min(I::VERSION));
+        stream.pack_u32(negotiated_version);
         let binding_id = stream.pack_new_object_id(router, interface.interface)?;
         stream.end_message(bind_start);
-        Ok(BoundInterface::<I>::new(binding_id))
+        Ok(BoundInterface::<I>::new(binding_id, negotiated_version))
     }
 
     pub fn add_interface(
@@ -196,7 +200,6 @@ impl WlRegistry {
 impl WlObject for WlRegistry {
     type Ops = RegistryOps;
     type Events = RegistryEvents;
-    const VERSION: u32 = 1;
 }
 
 #[cfg(test)]
@@ -205,7 +208,7 @@ mod tests {
     use std::os::unix::net::UnixStream;
 
     // Binds over a socket pair and returns the version field the compositor would receive.
-    fn bound_version<I: WlObject>(interface: RegistryInterface<I>) -> u32 {
+    fn bound_version<I: WlGlobal>(interface: RegistryInterface<I>) -> u32 {
         let (a, b) = UnixStream::pair().unwrap();
         let mut client = WlBufferedStream::new(a.into());
         let mut compositor = WlBufferedStream::new(b.into());

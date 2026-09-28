@@ -13,7 +13,6 @@ pub struct WlDataControlDevice {
 impl WlObject for WlDataControlDevice {
     type Ops = WlDataControlDeviceOps;
     type Events = WlDataControlDeviceEvents;
-    const VERSION: u32 = 1;
 }
 
 wl_enum! {

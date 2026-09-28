@@ -1,6 +1,6 @@
 use crate::wl::{
     objects::{
-        NoEvents, WlObject,
+        NoEvents, WlGlobal, WlObject,
         wl_data_control_device::WlDataControlDevice,
         wl_data_source::WlDataControlSource,
         wl_enum,
@@ -55,8 +55,12 @@ pub struct ExtDataControlManagerV1;
 impl WlObject for ExtDataControlManagerV1 {
     type Ops = ExtDataControlManagerOps;
     type Events = NoEvents;
+}
+
+impl WlGlobal for ExtDataControlManagerV1 {
     const VERSION: u32 = 1;
 }
+
 wl_enum! {
     pub enum ExtDataControlManagerOps {
         CreateDataSource = 0,
@@ -70,6 +74,8 @@ pub struct ZwlrDataControlManagerV1;
 impl WlObject for ZwlrDataControlManagerV1 {
     type Ops = ZwlrDataControlManagerOps;
     type Events = NoEvents;
+}
+impl WlGlobal for ZwlrDataControlManagerV1 {
     const VERSION: u32 = 2;
 }
 wl_enum! {
@@ -85,7 +91,6 @@ pub struct WlDataDeviceManager;
 impl WlObject for WlDataDeviceManager {
     type Ops = WlDataDeviceManagerOps;
     type Events = WlDataDeviceManagerEvents;
-    const VERSION: u32 = 1;
 }
 wl_enum! {
     pub enum WlDataDeviceManagerOps {

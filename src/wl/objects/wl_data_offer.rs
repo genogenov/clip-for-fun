@@ -36,7 +36,6 @@ pub struct WlDataControlOffer {
 impl WlObject for WlDataControlOffer {
     type Ops = WlDataControlOfferOps;
     type Events = WlDataControlOfferEvents;
-    const VERSION: u32 = 1;
 }
 
 impl WlDataControlOffer {

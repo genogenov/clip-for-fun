@@ -10,13 +10,16 @@ pub mod wl_registry;
 pub trait WlObject {
     type Ops: Into<u16>;
     type Events;
+}
+
+pub trait WlGlobal: WlObject {
     const VERSION: u32;
 }
 
 pub enum NoEvents {}
 
 wl_enum! {
-    pub enum NoOps {_NoOp = 0}
+    pub enum NoOps {_NoOp = 0 }
 }
 
 #[derive(Debug)]

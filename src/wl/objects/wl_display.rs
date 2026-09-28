@@ -78,7 +78,6 @@ impl WlDisplay {
 impl WlObject for WlDisplay {
     type Ops = DisplayOps;
     type Events = DisplayEvents;
-    const VERSION: u32 = 1;
 }
 
 wl_enum! {

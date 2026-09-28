@@ -16,7 +16,6 @@ pub struct WlDataControlSource {
 impl WlObject for WlDataControlSource {
     type Ops = WlDataControlSourceOps;
     type Events = WlDataControlSourceEvents;
-    const VERSION: u32 = 1;
 }
 
 pub enum WlDataControlSourceEvents {
