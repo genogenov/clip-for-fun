@@ -1,5 +1,5 @@
 use crate::{
-    debug_println,
+    log_debug,
     wl::{
         objects::{
             MessageHeader, WlCallbackEvents,
@@ -83,7 +83,7 @@ impl WlMessageRouter {
     pub fn register(&mut self, interface: WlInterface) -> Result<u32> {
         if let Some(free_index) = self.find_free_client() {
             self.client_interfaces[free_index] = Slot::Live(interface);
-            debug_println!(
+            log_debug!(
                 "Registered interface {:?} at client slot {}",
                 interface,
                 free_index
@@ -101,7 +101,7 @@ impl WlMessageRouter {
                 as usize,
         ) {
             *slot = Slot::Live(interface);
-            debug_println!("Registered interface {:?} at server slot {}", interface, id);
+            log_debug!("Registered interface {:?} at server slot {}", interface, id);
             Ok(id)
         } else {
             Err(Error::other(format!(
@@ -149,7 +149,7 @@ impl WlMessageRouter {
                             target_object_id, error_code, error_msg
                         ))),
                         DisplayEvent::DeleteId { id } => {
-                            debug_println!("Deleting WL client object id: {}", id);
+                            log_debug!("Deleting WL client object id: {}", id);
                             if let Some(slot) = self.client_interfaces.get_mut(id as usize) {
                                 *slot = Slot::Free;
                             }
@@ -198,14 +198,14 @@ impl WlMessageRouter {
         Ok(())
     }
 
-    pub fn dispatch_messages<F: FnMut(WlEvent<'_>) -> ControlFlow<()>>(
+    pub fn dispatch_messages<F: FnMut(WlEvent<'_>) -> ControlFlow<Result<()>>>(
         &mut self,
         stream: &mut WlBufferedStream,
         mut fnhandler: F,
     ) -> std::io::Result<()> {
         while let Some(event) = self.next_event(stream)? {
-            if fnhandler(event).is_break() {
-                return Ok(());
+            if let ControlFlow::Break(result) = fnhandler(event) {
+                return result;
             }
         }
 
@@ -436,7 +436,7 @@ mod tests {
         router
             .dispatch_messages(&mut stream, |event| {
                 if matches!(event, WlEvent::SyncDone) {
-                    ControlFlow::Break(())
+                    ControlFlow::Break(Ok(()))
                 } else {
                     ControlFlow::Continue(())
                 }
@@ -563,7 +563,7 @@ mod tests {
                     WlEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id }) => {
                         selection = offer_id
                     }
-                    WlEvent::SyncDone => return ControlFlow::Break(()),
+                    WlEvent::SyncDone => return ControlFlow::Break(Ok(())),
                     _ => {}
                 }
                 ControlFlow::Continue(())

@@ -22,5 +22,6 @@ jobs:
       - run: rustup toolchain install stable --profile minimal -c rustfmt,clippy && rustup default stable
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --release --all-targets -- -D warnings
       - run: cargo test
       - run: cargo build --release

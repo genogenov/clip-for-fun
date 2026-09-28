@@ -9,7 +9,7 @@ use std::{
     ptr,
 };
 
-use crate::debug_println;
+use crate::log_debug;
 
 const FD_BUFFER_LEN: usize = 32;
 
@@ -62,7 +62,7 @@ impl cmsghdr {
             let data_slice = unsafe { std::slice::from_raw_parts(data_ptr, fd_count) };
             fd_buffer.push_in_fds(data_slice)?;
 
-            debug_println!("Received {} file descriptors", fd_count);
+            log_debug!("Received {} file descriptors", fd_count);
         }
         Ok(())
     }

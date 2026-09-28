@@ -6,18 +6,24 @@ The reason this project exists is 99.9% for practicing my Rust skills, and gaini
 No libc crate or wayland libraries - it talks the Wayland wire protocol directly over the unix socket, with my own bindings for `sendmsg`/`recvmsg`.
 
 ## What works
-- Copy from an argument or stdin - Ctrl+V in other apps works
+- Copy from an argument or stdin - Ctrl+V in other apps works, including X11 apps under Xwayland (`UTF8_STRING`, `STRING`, `TEXT`)
+- Paste to stdout (`--paste`), picking the best text MIME type the clipboard owner offers
 - Wayland wire format (headers, ints, strings, new_id)
 - Registry + binding `wl_seat` and `ext_data_control_manager_v1`
-- Receiving fds over the socket (`SCM_RIGHTS`)
+- Sending and receiving fds over the socket (`SCM_RIGHTS`)
 - Reassembling messages split across socket reads
+- Object ID tables with typed event routing, for both client-created and compositor-created objects
+- Error messages instead of panics; colored output only on a terminal (honors `NO_COLOR`)
+- Unit tests and CI (fmt, clippy in debug and release, tests on x86_64 and aarch64)
 
 ## Todo
-- Paste mode (like `wl-paste`)
 - Fallback to `zwlr_data_control_manager_v1`
 - Run in the background after copying, like `wl-copy`
-- CLI flags (`--paste`, `--type`, `--primary`)
-- Proper error handling instead of `unwrap()`
+- CLI flags (`--type`, `--primary`)
+- MIME type guessing without spawning helpers like `xdg-mime`: on copy from the stdin file name or magic bytes (`clip-for-fun < shot.png` offers `image/png`), on paste from the stdout file name (`clip-for-fun --paste > shot.png` requests `image/png`)
+- Append a trailing `\n` on paste only when stdout is a terminal, the MIME type is text, and the data doesn't already end with one (never for files or pipes), with `-n`/`--no-newline` to suppress
+- Zero-copy paste with `splice` (pipe to stdout without passing through user space)
+- Benchmarks against `wl-clipboard`
 - More tests
 
 ## Usage
@@ -31,6 +37,12 @@ cargo build --release
 
 # or copy piped input
 cat file.txt | ./target/release/clip-for-fun
+
+# copy text that would otherwise be read as a flag (here: the literal text "--paste")
+./target/release/clip-for-fun -- "--paste"
+
+# paste to stdout
+./target/release/clip-for-fun --paste
 ```
 
 Then paste anywhere. The process stays alive until something else is copied, since on Wayland the owner of the clipboard has to serve the data itself.

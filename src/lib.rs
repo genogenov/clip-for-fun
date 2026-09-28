@@ -1,3 +1,5 @@
+#[doc(hidden)]
+mod log_writer;
 mod unix_fd_stream;
 mod wl;
 
@@ -14,6 +16,8 @@ pub use wl::{
     wl_buffered_stream::WlBufferedStream,
     wl_message_reader::WlMessageReader,
     wl_message_router::{WlEvent, WlMessageRouter},
+    wl_offer_tracker::{KNOWN_MIME_TYPES, OFFERED_TXT_MIME_TYPES, WlOffer, WlOfferTracker},
 };
 
+pub use log_writer::{Colors, LOGGER};
 pub use unix_fd_stream::FdWriteAndClose;
