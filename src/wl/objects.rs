@@ -30,13 +30,14 @@ pub struct MessageHeader {
 }
 
 impl MessageHeader {
-    pub const WL_HEADER_SIZE: u16 = 8; // 4 bytes for object ID, 2 bytes for opcode, 2 bytes for message length
+    pub const WL_HEADER_SIZE: u16 = 8; // object ID word + (size << 16 | opcode) word
 
     pub fn parse(h: &[u8; 8]) -> Self {
+        let word = u32::from_ne_bytes([h[4], h[5], h[6], h[7]]);
         Self {
             object_id: u32::from_ne_bytes([h[0], h[1], h[2], h[3]]),
-            opcode: u16::from_ne_bytes([h[4], h[5]]),
-            size: u16::from_ne_bytes([h[6], h[7]]),
+            opcode: word as u16,
+            size: (word >> 16) as u16,
         }
     }
 }

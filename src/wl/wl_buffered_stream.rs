@@ -123,7 +123,7 @@ impl WlBufferedStream {
 
         let buf = &mut self.write_buffer[self.write_cursor..self.write_cursor + 8];
         buf[0..4].copy_from_slice(&type_id.to_ne_bytes());
-        buf[4..6].copy_from_slice(&opcode.to_ne_bytes());
+        buf[4..8].copy_from_slice(&u32::from(opcode).to_ne_bytes());
 
         let message_start = self.write_cursor;
 
@@ -144,9 +144,11 @@ impl WlBufferedStream {
 
     #[inline(always)]
     pub fn end_message(&mut self, message_start: usize) {
-        let message_length = (self.write_cursor - message_start) as u16;
-        self.write_buffer[message_start + 6..message_start + 8]
-            .copy_from_slice(&message_length.to_ne_bytes());
+        let message_length = (self.write_cursor - message_start) as u32;
+        let word: &mut [u8; 4] = (&mut self.write_buffer[message_start + 4..message_start + 8])
+            .try_into()
+            .unwrap();
+        *word = (u32::from_ne_bytes(*word) | message_length << 16).to_ne_bytes();
     }
 
     #[inline(always)]
@@ -226,6 +228,22 @@ mod tests {
             );
             assert_eq!(u32::from_ne_bytes(buf[..4].try_into().unwrap()), 42);
         }
+    }
+
+    #[test]
+    fn header_second_word_is_size_high_opcode_low() {
+        let (mut tx, _rx) = stream_pair();
+        let start = tx.begin_message::<WlDisplay>(DisplayOps::GetRegistry, 1);
+        tx.pack_u32(2);
+        tx.end_message(start);
+        let word = u32::from_ne_bytes(tx.write_buffer[4..8].try_into().unwrap());
+        assert_eq!(word, 12 << 16 | 1);
+
+        let mut header = [0u8; 8];
+        header[..4].copy_from_slice(&7u32.to_ne_bytes());
+        header[4..].copy_from_slice(&(20u32 << 16 | 3).to_ne_bytes());
+        let parsed = MessageHeader::parse(&header);
+        assert_eq!((parsed.object_id, parsed.opcode, parsed.size), (7, 3, 20));
     }
 
     #[test]
@@ -333,8 +351,7 @@ mod tests {
             // 12-byte message: object_id=5, opcode=0, size=12, body u32=42
             let mut msg = Vec::new();
             msg.extend_from_slice(&5u32.to_ne_bytes());
-            msg.extend_from_slice(&0u16.to_ne_bytes());
-            msg.extend_from_slice(&12u16.to_ne_bytes());
+            msg.extend_from_slice(&(12u32 << 16).to_ne_bytes());
             msg.extend_from_slice(&42u32.to_ne_bytes());
             s.write_all(&msg[..8]).unwrap(); // header only
             std::thread::sleep(std::time::Duration::from_millis(100));

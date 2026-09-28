@@ -260,8 +260,7 @@ mod tests {
     fn msg(object_id: u32, opcode: u16, body: &[u8]) -> Vec<u8> {
         let mut m = Vec::with_capacity(8 + body.len());
         m.extend_from_slice(&object_id.to_ne_bytes());
-        m.extend_from_slice(&opcode.to_ne_bytes());
-        m.extend_from_slice(&((8 + body.len()) as u16).to_ne_bytes());
+        m.extend_from_slice(&(((8 + body.len()) as u32) << 16 | u32::from(opcode)).to_ne_bytes());
         m.extend_from_slice(body);
         m
     }
