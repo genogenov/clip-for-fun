@@ -1,5 +1,5 @@
-# Clip-For-Fun - a Wayland Clipboard Manager (for fun)
-This is a pure Rust, zero dependency implementation of a clipboard manager (copying and pasting, no history)\
+# Clip-For-Fun - a Wayland Clipboard Manager
+This is a pure Rust, zero dependency implementation of a clipboard manager (copying and pasting, history to be implemented soon)\
 It is very much a work in progress.
 
 No libc crate or wayland libraries - it talks the Wayland wire protocol directly over the unix socket, with custom bindings for `sendmsg`/`recvmsg`.
