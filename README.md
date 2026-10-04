@@ -42,7 +42,7 @@ For debug output, build without `--release` and run the binaries from `./target/
 ## Layout
 
 | Crate | Contents |
-|---|---|
+| --- | --- |
 | `core/` (`clip-for-fun-core`) | Wayland protocol: socket + fd passing, message reader/writer, object id routing, session setup (registry, seat, data-control device) |
 | `copy/` | `clip-for-fun-copy` |
 | `paste/` | `clip-for-fun-paste` |
