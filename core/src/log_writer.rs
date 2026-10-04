@@ -1,6 +1,6 @@
 use std::{
     fmt,
-    io::{self, IsTerminal},
+    io::{self, IsTerminal, Write},
     sync::LazyLock,
 };
 
@@ -56,15 +56,20 @@ impl LogWriter {
     }
 
     pub fn info(&self, args: fmt::Arguments<'_>) {
-        eprintln!("{} {args}", self.info_prefix);
+        Self::write_line(self.info_prefix, args);
     }
 
     pub fn error(&self, args: fmt::Arguments<'_>) {
-        eprintln!("{} {args}", self.error_prefix);
+        Self::write_line(self.error_prefix, args);
     }
 
     pub fn debug(&self, args: fmt::Arguments<'_>) {
-        eprintln!("{} {args}", self.debug_prefix);
+        Self::write_line(self.debug_prefix, args);
+    }
+
+    fn write_line(prefix: &str, args: fmt::Arguments<'_>) {
+        let line = format!("{prefix} {args}\n");
+        let _ = io::stderr().write_all(line.as_bytes());
     }
 }
 
