@@ -1,4 +1,4 @@
-use std::{os::fd::OwnedFd, path::Path};
+use std::path::Path;
 
 pub type NextMessageResult<'a> =
     std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut FdBuffer)>>;
@@ -7,8 +7,7 @@ use crate::{
     log_debug,
     unix_fd_stream::{FdBuffer, UnixFdStream},
     wl::{
-        objects::{MessageHeader, WlObject, WlStr},
-        wl_message_router::{WlInterface, WlMessageRouter},
+        objects::MessageHeader,
         wl_message_writer::WlMessageWriter,
     },
 };

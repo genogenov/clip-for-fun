@@ -1,6 +1,5 @@
 use crate::wl::{
     objects::{WlObject, wl_enum, wl_registry::WlRegistry},
-    wl_buffered_stream::WlBufferedStream,
     wl_message_reader::WlMessageReader,
     wl_message_router::{WlInterface, WlMessageRouter},
     wl_message_writer::WlMessageWriter,

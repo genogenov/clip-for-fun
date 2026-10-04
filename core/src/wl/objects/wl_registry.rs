@@ -9,10 +9,7 @@ use crate::wl::objects::{NoEvents, WlGlobal};
 use crate::wl::wl_message_reader::WlMessageReader;
 use crate::wl::wl_message_router::{WlInterface, WlMessageRouter};
 use crate::wl::wl_message_writer::WlMessageWriter;
-use crate::wl::{
-    objects::{MessageHeader, WlObject, WlStr, wl_enum, wl_str_bytes},
-    wl_buffered_stream::WlBufferedStream,
-};
+use crate::wl::objects::{MessageHeader, WlObject, WlStr, wl_enum, wl_str_bytes};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RegistryInterface<I>

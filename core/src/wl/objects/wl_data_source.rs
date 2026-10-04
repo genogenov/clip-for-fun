@@ -4,7 +4,6 @@ use crate::{
     unix_fd_stream::FdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
-        wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
         wl_message_writer::WlMessageWriter,
     },

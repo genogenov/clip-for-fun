@@ -61,9 +61,9 @@ impl WlSessionManager {
             );
 
             Ok(WlSessionManager {
-                display: display,
-                stream: stream,
-                router: router,
+                display,
+                stream,
+                router,
                 ext_data_control_manager: mgr_local,
                 local_data_device,
             })

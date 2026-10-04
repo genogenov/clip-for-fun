@@ -4,7 +4,6 @@ use crate::{
     unix_fd_stream::FdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
-        wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
         wl_message_router::WlMessageRouter,
         wl_message_writer::WlMessageWriter,
@@ -63,7 +62,7 @@ impl WlDataControlOffer {
         writer: WlMessageWriter,
         router: &mut WlMessageRouter,
     ) -> Result<(), std::io::Error> {
-        let mut msg = writer
+        let msg = writer
             .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Destroy, self.local_id)?;
         msg.end();
         router.free_server(self.local_id)
