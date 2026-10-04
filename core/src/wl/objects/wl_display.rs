@@ -3,6 +3,7 @@ use crate::wl::{
     wl_buffered_stream::WlBufferedStream,
     wl_message_reader::WlMessageReader,
     wl_message_router::{WlInterface, WlMessageRouter},
+    wl_message_writer::WlMessageWriter,
 };
 
 pub struct WlDisplay {
@@ -51,27 +52,29 @@ impl WlDisplay {
 
     pub fn get_registry(
         &mut self,
-        stream: &mut WlBufferedStream,
+        writer: WlMessageWriter,
         router: &mut WlMessageRouter,
     ) -> std::io::Result<WlRegistry> {
-        let registry_start =
-            stream.begin_message::<WlDisplay>(DisplayOps::GetRegistry, WlDisplay::TYPE_ID);
-        let registry_id = stream.pack_new_object_id(router, WlInterface::Registry)?;
-        stream.end_message(registry_start);
+        let mut msg =
+            writer.begin_message::<WlDisplay>(DisplayOps::GetRegistry, WlDisplay::TYPE_ID)?;
+        let id = router.register_client(WlInterface::Registry)?;
+        msg.pack_new_object_id(&id)?;
+        msg.end();
 
-        Ok(WlRegistry::new(registry_id))
+        Ok(WlRegistry::new(id.commit()))
     }
 
-    pub fn sync(
+    pub fn schedule_sync(
         &mut self,
-        stream: &mut WlBufferedStream,
+        writer: WlMessageWriter,
         router: &mut WlMessageRouter,
     ) -> std::io::Result<()> {
-        let sync_start = stream.begin_message::<WlDisplay>(DisplayOps::Sync, WlDisplay::TYPE_ID);
-        self.callback_id = stream.pack_new_object_id(router, WlInterface::Callback)?;
-        stream.end_message(sync_start);
-
-        stream.write()
+        let mut msg = writer.begin_message::<WlDisplay>(DisplayOps::Sync, WlDisplay::TYPE_ID)?;
+        let callback_id = router.register_client(WlInterface::Callback)?;
+        msg.pack_new_object_id(&callback_id)?;
+        msg.end();
+        self.callback_id = callback_id.commit();
+        Ok(())
     }
 }
 

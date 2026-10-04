@@ -7,6 +7,7 @@ use crate::{
         wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
         wl_message_router::WlMessageRouter,
+        wl_message_writer::WlMessageWriter,
     },
 };
 
@@ -45,26 +46,26 @@ impl WlDataControlOffer {
 
     pub fn receive(
         &self,
-        stream: &mut WlBufferedStream,
+        writer: WlMessageWriter,
         mime: &str,
         fd: OwnedFd,
     ) -> Result<(), std::io::Error> {
-        stream.pack_fd(fd)?;
-        let start = stream
-            .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Receive, self.local_id);
-        stream.pack_str(mime)?;
-        stream.end_message(start);
+        let mut msg = writer
+            .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Receive, self.local_id)?;
+        msg.pack_str(mime)?;
+        msg.pack_fd(fd)?;
+        msg.end();
         Ok(())
     }
 
     pub fn destroy(
         &self,
-        stream: &mut WlBufferedStream,
+        writer: WlMessageWriter,
         router: &mut WlMessageRouter,
     ) -> Result<(), std::io::Error> {
-        let start = stream
-            .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Destroy, self.local_id);
-        stream.end_message(start);
+        let mut msg = writer
+            .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Destroy, self.local_id)?;
+        msg.end();
         router.free_server(self.local_id)
     }
 

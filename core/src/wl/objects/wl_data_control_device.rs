@@ -2,8 +2,8 @@ use crate::{
     unix_fd_stream::FdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
-        wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
+        wl_message_writer::WlMessageWriter,
     },
 };
 
@@ -80,12 +80,13 @@ impl WlDataControlDevice {
         }
     }
 
-    pub fn set_selection(&self, stream: &mut WlBufferedStream, source_id: u32) {
-        let start = stream.begin_message::<WlDataControlDevice>(
+    pub fn set_selection(&self, writer: WlMessageWriter, source_id: u32) -> std::io::Result<()> {
+        let mut msg = writer.begin_message::<WlDataControlDevice>(
             WlDataControlDeviceOps::SetSelection,
             self.local_id,
-        );
-        stream.pack_u32(source_id);
-        stream.end_message(start);
+        )?;
+        msg.pack_u32(source_id)?;
+        msg.end();
+        Ok(())
     }
 }

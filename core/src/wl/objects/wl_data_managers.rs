@@ -1,13 +1,16 @@
-use crate::wl::{
-    objects::{
-        NoEvents, WlGlobal, WlObject,
-        wl_data_control_device::WlDataControlDevice,
-        wl_data_source::WlDataControlSource,
-        wl_enum,
-        wl_registry::{BoundInterface, RegistryInterface},
+use crate::{
+    WlMessageRouter,
+    wl::{
+        objects::{
+            NoEvents, WlGlobal, WlObject,
+            wl_data_control_device::WlDataControlDevice,
+            wl_data_source::WlDataControlSource,
+            wl_enum,
+            wl_registry::{BoundInterface, RegistryInterface},
+        },
+        wl_message_router::WlInterface,
+        wl_message_writer::WlMessageWriter,
     },
-    wl_buffered_stream::WlBufferedStream,
-    wl_message_router::{WlInterface, WlMessageRouter},
 };
 
 pub trait DataDeviceManagerExt {
@@ -15,37 +18,38 @@ pub trait DataDeviceManagerExt {
 
     fn get_data_device(
         &self,
-        stream: &mut WlBufferedStream,
+        writer: WlMessageWriter,
         router: &mut WlMessageRouter,
         seat_id: u32,
     ) -> std::io::Result<WlDataControlDevice> {
-        let data_device_start = stream.begin_message::<WlDataDeviceManager>(
+        let mut msg = writer.begin_message::<WlDataDeviceManager>(
             WlDataDeviceManagerOps::GetDataDevice,
             self.manager_id(),
-        );
-        let data_device_id = stream.pack_new_object_id(router, WlInterface::DataControlDevice)?;
-        stream.pack_u32(seat_id);
-        stream.end_message(data_device_start);
-
-        Ok(WlDataControlDevice {
-            local_id: data_device_id,
-        })
+        )?;
+        let data_device_id = router.register_client(WlInterface::DataControlDevice)?;
+        msg.pack_new_object_id(&data_device_id)?;
+        msg.pack_u32(seat_id)?;
+        msg.end();
+        let id = data_device_id.commit();
+        Ok(WlDataControlDevice { local_id: id })
     }
 
     fn create_data_source(
         &self,
-        stream: &mut WlBufferedStream,
+        writer: WlMessageWriter,
         router: &mut WlMessageRouter,
     ) -> std::io::Result<WlDataControlSource> {
-        let data_source_start = stream.begin_message::<WlDataDeviceManager>(
+        let mut msg = writer.begin_message::<WlDataDeviceManager>(
             WlDataDeviceManagerOps::CreateDataSource,
             self.manager_id(),
-        );
-        let data_source_id = stream.pack_new_object_id(router, WlInterface::DataControlSource)?;
-        stream.end_message(data_source_start);
+        )?;
+        let data_source_id = router.register_client(WlInterface::DataControlSource)?;
+
+        msg.pack_new_object_id(&data_source_id)?;
+        msg.end();
 
         Ok(WlDataControlSource {
-            local_id: data_source_id,
+            local_id: data_source_id.commit(),
         })
     }
 }

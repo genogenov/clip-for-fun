@@ -1,10 +1,12 @@
 # Clip-For-Fun - a Wayland Clipboard Manager
+
 This is a pure Rust, zero dependency implementation of a clipboard manager (copying and pasting, history to be implemented soon)\
 It is very much a work in progress.
 
 No libc crate or wayland libraries - it talks the Wayland wire protocol directly over the unix socket, with custom bindings for `sendmsg`/`recvmsg`.
 
 ## What works
+
 - Copy from an argument or stdin - Ctrl+V in other apps works, including X11 apps under Xwayland (`UTF8_STRING`, `STRING`, `TEXT`)
 - Paste to stdout (`--paste`), picking the best text MIME type the clipboard owner offers, streamed zero-copy with `splice` (via std::io::copy) when stdout is a file or pipe
 - Wayland wire format (headers, ints, strings, new_id)
@@ -12,6 +14,7 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 - Sending and receiving fds over the socket (`SCM_RIGHTS`)
 
 ## Todo
+
 - Run in the background after copying, like `wl-copy`
 - Benchmark against other popular copy/paste/clip history managers
 - Watch mode + history support
@@ -22,6 +25,7 @@ No libc crate or wayland libraries - it talks the Wayland wire protocol directly
 - Fallback to `zwlr_data_control_manager_v1`
 
 ## Usage
+
 Needs a compositor that supports `ext_data_control_manager_v1` (developed and tested on Hyprland).
 
 ```sh

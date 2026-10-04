@@ -19,6 +19,7 @@ pub use wl::{
     wl_message_reader::WlMessageReader,
     wl_message_router::{WlEvent, WlMessageRouter},
     wl_offer_tracker::{KNOWN_MIME_TYPES, OFFERED_TXT_MIME_TYPES, WlOffer, WlOfferTracker},
+    wl_session_manager::WlSessionManager,
 };
 
 pub use log_writer::{Colors, LOGGER};

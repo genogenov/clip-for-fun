@@ -142,6 +142,16 @@ impl FdBuffer {
         &self.out_fds[..self.out_fd_count]
     }
 
+    pub fn truncate_out(&mut self, truncate_count: usize) {
+        if truncate_count > self.out_fd_count {
+            return;
+        }
+        for slot in &mut self.out_fds[self.out_fd_count - truncate_count..self.out_fd_count] {
+            *slot = None;
+        }
+        self.out_fd_count -= truncate_count;
+    }
+
     pub fn clear_and_close_out_fds(&mut self) {
         for slot in &mut self.out_fds[..self.out_fd_count] {
             *slot = None;
@@ -234,20 +244,21 @@ impl UnixFdStream {
         }
     }
 
-    pub fn write(&mut self, buff: &[u8], fds: &[Option<OwnedFd>]) -> std::io::Result<()> {
+    pub fn write(&mut self, data: &[u8], fds: &[Option<OwnedFd>]) -> std::io::Result<()> {
         if fds.is_empty() {
-            self.send_all(&mut [], buff)
+            self.send_all(&mut [], data)
         } else if fds.len() > FD_BUFFER_LEN {
             Err(std::io::Error::other("Too many file descriptors to send"))
         } else {
             let fds_bytes_len: usize = fds.len() * std::mem::size_of::<RawFd>();
             let cmsg_space = cmsg_space(fds_bytes_len);
             let mut ctrl_buffer: AlignedCmsghdr = AlignedCmsghdr([0u8; CTRL_BUFFER_SIZE]);
-            let buf = &mut ctrl_buffer.0;
-            buf[..USIZE].copy_from_slice(&(CMSG_FD_OFFSET + fds_bytes_len).to_ne_bytes());
-            buf[USIZE..USIZE + 4].copy_from_slice(&SOL_SOCKET.to_ne_bytes());
-            buf[USIZE + 4..USIZE + 8].copy_from_slice(&SCM_RIGHTS.to_ne_bytes());
-            for (dst, fd) in buf[CMSG_FD_OFFSET..]
+            let mut_ctrl_buffer = &mut ctrl_buffer.0;
+            mut_ctrl_buffer[..USIZE]
+                .copy_from_slice(&(CMSG_FD_OFFSET + fds_bytes_len).to_ne_bytes());
+            mut_ctrl_buffer[USIZE..USIZE + 4].copy_from_slice(&SOL_SOCKET.to_ne_bytes());
+            mut_ctrl_buffer[USIZE + 4..USIZE + 8].copy_from_slice(&SCM_RIGHTS.to_ne_bytes());
+            for (dst, fd) in mut_ctrl_buffer[CMSG_FD_OFFSET..]
                 .as_chunks_mut::<4>()
                 .0
                 .iter_mut()
@@ -256,7 +267,7 @@ impl UnixFdStream {
                 dst.copy_from_slice(&fd.to_ne_bytes());
             }
 
-            self.send_all(&mut ctrl_buffer.0[..cmsg_space], buff)
+            self.send_all(&mut mut_ctrl_buffer[..cmsg_space], data)
         }
     }
 

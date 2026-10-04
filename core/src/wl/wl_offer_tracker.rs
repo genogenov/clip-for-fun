@@ -22,7 +22,7 @@ pub const OFFERED_TXT_MIME_TYPES: [&str; 5] =
     [TEXT_PLAIN_UTF8, UTF8_STRING, TEXT_PLAIN, STRING, TEXT];
 
 pub struct WlOffer {
-    pub id: u32,
+    id: u32,
     preferred_rank: Option<usize>,
 }
 
@@ -43,11 +43,15 @@ impl WlOffer {
     pub fn preferred_mime(&self) -> Option<&'static str> {
         self.preferred_rank.map(|r| KNOWN_MIME_TYPES[r])
     }
+
+    pub fn id(&self) -> u32 {
+        self.id
+    }
 }
 
 pub struct WlOfferTracker {
-    pub offers: [Option<WlOffer>; 2],
-    pub selection_id: Option<u32>,
+    offers: [Option<WlOffer>; 2],
+    selection_id: Option<u32>,
 }
 
 impl Default for WlOfferTracker {

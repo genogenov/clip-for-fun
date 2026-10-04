@@ -6,6 +6,7 @@ use crate::{
         objects::{WlObject, wl_enum},
         wl_buffered_stream::WlBufferedStream,
         wl_message_reader::WlMessageReader,
+        wl_message_writer::WlMessageWriter,
     },
 };
 
@@ -36,11 +37,11 @@ pub enum WlDataControlSourceEvent<'a> {
 }
 
 impl WlDataControlSource {
-    pub fn offer(&self, stream: &mut WlBufferedStream, mime_type: &str) -> std::io::Result<()> {
-        let bind_start = stream
-            .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Offer, self.local_id);
-        stream.pack_str(mime_type)?;
-        stream.end_message(bind_start);
+    pub fn offer(&self, writer: WlMessageWriter, mime_type: &str) -> std::io::Result<()> {
+        let mut msg = writer
+            .begin_message::<WlDataControlSource>(WlDataControlSourceOps::Offer, self.local_id)?;
+        msg.pack_str(mime_type)?;
+        msg.end();
         Ok(())
     }
 

@@ -3,5 +3,19 @@
 version = 4
 
 [[package]]
-name = "clip-for-fun"
+name = "clip-for-fun-copy"
 version = "0.1.0"
+dependencies = [
+ "clip-for-fun-core",
+]
+
+[[package]]
+name = "clip-for-fun-core"
+version = "0.1.0"
+
+[[package]]
+name = "clip-for-fun-paste"
+version = "0.1.0"
+dependencies = [
+ "clip-for-fun-core",
+]

@@ -1,0 +1,4 @@
+[package]
+name = "clip-for-fun-core"
+version.workspace = true
+edition.workspace = true

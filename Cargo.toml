@@ -1,9 +1,23 @@
-[package]
-name = "clip-for-fun"
+[workspace]
+resolver = "3"
+members = ["core", "copy", "paste"]
+
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+
+
+
+
+
+# [package]
+# name = "clip-for-fun"
+# version = "0.1.0"
+# edition = "2024"
+
+# [dependencies]
 
 [profile.release]
 opt-level = 3        # Already the default, but ensures maximum speed optimization
