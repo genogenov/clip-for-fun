@@ -321,83 +321,112 @@ mod tests {
         )
     }
 
-    // #[test]
-    // fn ids_are_dense_and_reused_after_delete_id() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     assert_eq!(
-    //         router.register(WlInterface::Registry).unwrap(),
-    //         WlLocalId(2)
-    //     );
-    //     assert_eq!(
-    //         router.register(WlInterface::Callback).unwrap(),
-    //         WlLocalId(3)
-    //     );
-    //     assert_eq!(router.register(WlInterface::Seat).unwrap(), WlLocalId(4));
+    #[test]
+    fn ids_are_dense_and_reused_after_delete_id() {
+        let (mut router, mut stream, mut peer) = setup();
+        assert_eq!(
+            router
+                .register_client(WlInterface::Registry)
+                .unwrap()
+                .commit(),
+            2
+        );
+        assert_eq!(
+            router
+                .register_client(WlInterface::Callback)
+                .unwrap()
+                .commit(),
+            3
+        );
+        assert_eq!(
+            router.register_client(WlInterface::Seat).unwrap().commit(),
+            4
+        );
 
-    //     peer.write_all(&msg(
-    //         WlDisplay::TYPE_ID,
-    //         DisplayEvents::DeleteId.into(),
-    //         &3u32.to_ne_bytes(),
-    //     ))
-    //     .unwrap();
-    //     assert!(matches!(
-    //         router.next_event(&mut stream).unwrap(),
-    //         Some(WlEvent::Ignored)
-    //     ));
-    //     assert_eq!(
-    //         router.register(WlInterface::DataControlSource).unwrap(),
-    //         WlLocalId(3)
-    //     );
-    // }
+        peer.write_all(&msg(
+            WlDisplay::TYPE_ID,
+            DisplayEvents::DeleteId.into(),
+            &3u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::Ignored)
+        ));
+        assert_eq!(
+            router
+                .register_client(WlInterface::DataControlSource)
+                .unwrap()
+                .commit(),
+            3
+        );
+    }
 
-    // #[test]
-    // fn data_offer_registers_the_offer_and_its_events_carry_its_id() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     let device = router.register(WlInterface::DataControlDevice).unwrap();
-    //     let offer: u32 = 0xff00_0000;
+    #[test]
+    fn a_dropped_pending_id_frees_its_slot() {
+        let mut router = WlMessageRouter::new();
+        let pending = router.register_client(WlInterface::Registry).unwrap();
+        assert_eq!(pending.id(), 2);
+        drop(pending);
+        assert_eq!(router.lookup_slot(2), None);
+        assert_eq!(
+            router.register_client(WlInterface::Seat).unwrap().commit(),
+            2
+        );
+        assert_eq!(router.lookup_slot(2), Some(WlInterface::Seat));
+    }
 
-    //     let mut bytes = msg(
-    //         device,
-    //         WlDataControlDeviceEvents::DataOffer.into(),
-    //         &offer.to_ne_bytes(),
-    //     );
-    //     bytes.extend(msg(
-    //         offer,
-    //         WlDataControlOfferEvents::Offer.into(),
-    //         &wl_str("text/plain"),
-    //     ));
-    //     bytes.extend(msg(
-    //         device,
-    //         WlDataControlDeviceEvents::Selection.into(),
-    //         &offer.to_ne_bytes(),
-    //     ));
-    //     bytes.extend(msg(
-    //         device,
-    //         WlDataControlDeviceEvents::PrimarySelection.into(),
-    //         &0u32.to_ne_bytes(),
-    //     ));
-    //     peer.write_all(&bytes).unwrap();
+    #[test]
+    fn data_offer_registers_the_offer_and_its_events_carry_its_id() {
+        let (mut router, mut stream, mut peer) = setup();
+        let device = router
+            .register_client(WlInterface::DataControlDevice)
+            .unwrap()
+            .commit();
+        let offer: u32 = 0xff00_0000;
 
-    //     assert!(matches!(
-    //         router.next_event(&mut stream).unwrap(),
-    //         Some(WlEvent::DataControlDevice(DataControlDeviceEvent::DataOffer { new_id })) if new_id == offer
-    //     ));
-    //     assert!(matches!(
-    //         router.next_event(&mut stream).unwrap(),
-    //         Some(WlEvent::DataControlOffer { id, event: DataControlOfferEvent::Offer { mime } })
-    //             if id == offer && mime == b"text/plain"
-    //     ));
-    //     assert!(matches!(
-    //         router.next_event(&mut stream).unwrap(),
-    //         Some(WlEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id: Some(id) })) if id == offer
-    //     ));
-    //     assert!(matches!(
-    //         router.next_event(&mut stream).unwrap(),
-    //         Some(WlEvent::DataControlDevice(
-    //             DataControlDeviceEvent::PrimarySelection { offer_id: None }
-    //         ))
-    //     ));
-    // }
+        let mut bytes = msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &offer.to_ne_bytes(),
+        );
+        bytes.extend(msg(
+            offer,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/plain"),
+        ));
+        bytes.extend(msg(
+            device,
+            WlDataControlDeviceEvents::Selection.into(),
+            &offer.to_ne_bytes(),
+        ));
+        bytes.extend(msg(
+            device,
+            WlDataControlDeviceEvents::PrimarySelection.into(),
+            &0u32.to_ne_bytes(),
+        ));
+        peer.write_all(&bytes).unwrap();
+
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::DataControlDevice(DataControlDeviceEvent::DataOffer { new_id })) if new_id == offer
+        ));
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::DataControlOffer { id, event: DataControlOfferEvent::Offer { mime } })
+                if id == offer && mime == b"text/plain"
+        ));
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id: Some(id) })) if id == offer
+        ));
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::DataControlDevice(
+                DataControlDeviceEvent::PrimarySelection { offer_id: None }
+            ))
+        ));
+    }
 
     #[test]
     fn unknown_server_object_is_ignored_but_unknown_client_object_is_an_error() {
@@ -413,224 +442,245 @@ mod tests {
         assert!(router.next_event(&mut stream).is_err());
     }
 
-    // #[test]
-    // fn malformed_or_unknown_events_are_errors() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     let device = router.register(WlInterface::DataControlDevice).unwrap();
+    #[test]
+    fn malformed_or_unknown_events_are_errors() {
+        let (mut router, mut stream, mut peer) = setup();
+        let device = router
+            .register_client(WlInterface::DataControlDevice)
+            .unwrap()
+            .commit();
 
-    //     peer.write_all(&msg(device, 9, &[])).unwrap();
-    //     assert!(router.next_event(&mut stream).is_err(), "unknown opcode");
+        peer.write_all(&msg(device, 9, &[])).unwrap();
+        assert!(router.next_event(&mut stream).is_err(), "unknown opcode");
 
-    //     peer.write_all(&msg(
-    //         device,
-    //         WlDataControlDeviceEvents::Selection.into(),
-    //         &[],
-    //     ))
-    //     .unwrap();
-    //     assert!(router.next_event(&mut stream).is_err(), "missing argument");
+        peer.write_all(&msg(
+            device,
+            WlDataControlDeviceEvents::Selection.into(),
+            &[],
+        ))
+        .unwrap();
+        assert!(router.next_event(&mut stream).is_err(), "missing argument");
 
-    //     peer.write_all(&msg(
-    //         device,
-    //         WlDataControlDeviceEvents::DataOffer.into(),
-    //         &5u32.to_ne_bytes(),
-    //     ))
-    //     .unwrap();
-    //     assert!(
-    //         router.next_event(&mut stream).is_err(),
-    //         "new_id outside server range"
-    //     );
-    // }
+        peer.write_all(&msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &5u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        assert!(
+            router.next_event(&mut stream).is_err(),
+            "new_id outside server range"
+        );
+    }
 
-    // #[test]
-    // fn callback_done_is_sync_done_and_display_error_is_an_error() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     let callback = router.register(WlInterface::Callback).unwrap();
-    //     peer.write_all(&msg(
-    //         callback,
-    //         WlCallbackEvents::Done as u16,
-    //         &7u32.to_ne_bytes(),
-    //     ))
-    //     .unwrap();
-    //     assert!(matches!(
-    //         router.next_event(&mut stream).unwrap(),
-    //         Some(WlEvent::SyncDone)
-    //     ));
+    #[test]
+    fn callback_done_is_sync_done_and_display_error_is_an_error() {
+        let (mut router, mut stream, mut peer) = setup();
+        let callback = router
+            .register_client(WlInterface::Callback)
+            .unwrap()
+            .commit();
+        peer.write_all(&msg(
+            callback,
+            WlCallbackEvents::Done as u16,
+            &7u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::SyncDone)
+        ));
 
-    //     let mut body = 2u32.to_ne_bytes().to_vec();
-    //     body.extend(1u32.to_ne_bytes());
-    //     body.extend(wl_str("invalid arguments"));
-    //     peer.write_all(&msg(WlDisplay::TYPE_ID, DisplayEvents::Error.into(), &body))
-    //         .unwrap();
-    //     let Err(err) = router.next_event(&mut stream) else {
-    //         panic!("display error was not reported");
-    //     };
-    //     assert!(err.to_string().contains("invalid arguments"));
-    // }
+        let mut body = 2u32.to_ne_bytes().to_vec();
+        body.extend(1u32.to_ne_bytes());
+        body.extend(wl_str("invalid arguments"));
+        peer.write_all(&msg(WlDisplay::TYPE_ID, DisplayEvents::Error.into(), &body))
+            .unwrap();
+        let Err(err) = router.next_event(&mut stream) else {
+            panic!("display error was not reported");
+        };
+        assert!(err.to_string().contains("invalid arguments"));
+    }
 
-    // #[test]
-    // fn dispatch_stops_on_break_and_reports_unexpected_eof() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     let callback = router.register(WlInterface::Callback).unwrap();
-    //     peer.write_all(&msg(
-    //         callback,
-    //         WlCallbackEvents::Done as u16,
-    //         &0u32.to_ne_bytes(),
-    //     ))
-    //     .unwrap();
-    //     drop(peer);
+    #[test]
+    fn dispatch_stops_on_break_and_reports_unexpected_eof() {
+        let (mut router, mut stream, mut peer) = setup();
+        let callback = router
+            .register_client(WlInterface::Callback)
+            .unwrap()
+            .commit();
+        peer.write_all(&msg(
+            callback,
+            WlCallbackEvents::Done as u16,
+            &0u32.to_ne_bytes(),
+        ))
+        .unwrap();
+        drop(peer);
 
-    //     router
-    //         .dispatch_messages(&mut stream, |event| {
-    //             if matches!(event, WlEvent::SyncDone) {
-    //                 ControlFlow::Break(Ok(()))
-    //             } else {
-    //                 ControlFlow::Continue(())
-    //             }
-    //         })
-    //         .unwrap();
-    //     let err = router
-    //         .dispatch_messages(&mut stream, |_| ControlFlow::Continue(()))
-    //         .unwrap_err();
-    //     assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
-    // }
+        router
+            .dispatch_messages(&mut stream, |event| {
+                if matches!(event, WlEvent::SyncDone) {
+                    ControlFlow::Break(Ok(()))
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .unwrap();
+        let err = router
+            .dispatch_messages(&mut stream, |_| ControlFlow::Continue(()))
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
+    }
 
-    // #[test]
-    // fn receive_sends_mime_with_fd_and_destroy_frees_the_offer() {
-    //     let (a, b) = UnixStream::pair().unwrap();
-    //     let mut client = WlBufferedStream::new(a.into());
-    //     let mut compositor = WlBufferedStream::new(b.into());
-    //     let mut router = WlMessageRouter::new();
-    //     let offer_id: u32 = 0xff00_0000;
-    //     router
-    //         .register_server(WlInterface::DataControlOffer, offer_id)
-    //         .unwrap();
+    #[test]
+    fn receive_sends_mime_with_fd_and_destroy_frees_the_offer() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let mut client = WlBufferedStream::new(a.into());
+        let mut compositor = WlBufferedStream::new(b.into());
+        let mut router = WlMessageRouter::new();
+        let offer_id: u32 = 0xff00_0000;
+        router
+            .register_server(WlInterface::DataControlOffer, offer_id)
+            .unwrap();
 
-    //     let (mut payload_rx, payload_tx) = UnixStream::pair().unwrap();
-    //     let offer = WlDataControlOffer::new(offer_id);
-    //     offer
-    //         .receive(&mut client, "text/plain", payload_tx.into())
-    //         .unwrap();
-    //     offer.destroy(&mut client, &mut router).unwrap();
-    //     client.write().unwrap();
+        let (mut payload_rx, payload_tx) = UnixStream::pair().unwrap();
+        let offer = WlDataControlOffer::new(offer_id);
+        offer
+            .receive(client.get_writer(), "text/plain", payload_tx.into())
+            .unwrap();
+        offer.destroy(client.get_writer(), &mut router).unwrap();
+        client.write().unwrap();
 
-    //     let (header, body, fds) = compositor.read_next_message().unwrap().unwrap();
-    //     assert_eq!(
-    //         (header.object_id, header.opcode),
-    //         (offer_id, u16::from(WlDataControlOfferOps::Receive))
-    //     );
-    //     assert_eq!(WlMessageReader::new(body).str(), Some(&b"text/plain"[..]));
-    //     fds.pop_last_in_fd()
-    //         .unwrap()
-    //         .fd_write_and_close(b"hello")
-    //         .unwrap();
+        let (header, body, fds) = compositor.read_next_message().unwrap().unwrap();
+        assert_eq!(
+            (header.object_id, header.opcode),
+            (offer_id, u16::from(WlDataControlOfferOps::Receive))
+        );
+        assert_eq!(WlMessageReader::new(body).str(), Some(&b"text/plain"[..]));
+        fds.pop_last_in_fd()
+            .unwrap()
+            .fd_write_and_close(b"hello")
+            .unwrap();
 
-    //     let (header, ..) = compositor.read_next_message().unwrap().unwrap();
-    //     assert_eq!(
-    //         (header.object_id, header.opcode, header.size),
-    //         (offer_id, u16::from(WlDataControlOfferOps::Destroy), 8)
-    //     );
-    //     assert_eq!(router.lookup_slot(offer_id), None);
+        let (header, ..) = compositor.read_next_message().unwrap().unwrap();
+        assert_eq!(
+            (header.object_id, header.opcode, header.size),
+            (offer_id, u16::from(WlDataControlOfferOps::Destroy), 8)
+        );
+        assert_eq!(router.lookup_slot(offer_id), None);
 
-    //     // Times out instead of hanging if the client kept its copy of the write end.
-    //     payload_rx
-    //         .set_read_timeout(Some(Duration::from_secs(1)))
-    //         .unwrap();
-    //     let mut got = Vec::new();
-    //     payload_rx.read_to_end(&mut got).unwrap();
-    //     assert_eq!(got, b"hello");
-    // }
+        // Times out instead of hanging if the client kept its copy of the write end.
+        payload_rx
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let mut got = Vec::new();
+        payload_rx.read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"hello");
+    }
 
-    // #[test]
-    // fn paste_burst_is_routed_per_offer_and_messages_after_done_are_kept() {
-    //     let (mut router, mut stream, mut peer) = setup();
-    //     let seat = router.register(WlInterface::Seat).unwrap();
-    //     let device = router.register(WlInterface::DataControlDevice).unwrap();
-    //     let callback = router.register(WlInterface::Callback).unwrap();
-    //     let (clipboard, primary) = (0xff00_0000u32, 0xff00_0001u32);
+    #[test]
+    fn paste_burst_is_routed_per_offer_and_messages_after_done_are_kept() {
+        let (mut router, mut stream, mut peer) = setup();
+        let seat = router.register_client(WlInterface::Seat).unwrap().commit();
+        let device = router
+            .register_client(WlInterface::DataControlDevice)
+            .unwrap()
+            .commit();
+        let callback = router
+            .register_client(WlInterface::Callback)
+            .unwrap()
+            .commit();
+        let (clipboard, primary) = (0xff00_0000u32, 0xff00_0001u32);
 
-    //     // What a compositor sends right after bind + get_data_device + sync, in one write.
-    //     let mut burst = msg(seat, 0, &3u32.to_ne_bytes());
-    //     burst.extend(msg(
-    //         device,
-    //         WlDataControlDeviceEvents::DataOffer.into(),
-    //         &clipboard.to_ne_bytes(),
-    //     ));
-    //     burst.extend(msg(
-    //         clipboard,
-    //         WlDataControlOfferEvents::Offer.into(),
-    //         &wl_str("text/html"),
-    //     ));
-    //     burst.extend(msg(
-    //         clipboard,
-    //         WlDataControlOfferEvents::Offer.into(),
-    //         &wl_str("text/plain;charset=utf-8"),
-    //     ));
-    //     burst.extend(msg(
-    //         device,
-    //         WlDataControlDeviceEvents::Selection.into(),
-    //         &clipboard.to_ne_bytes(),
-    //     ));
-    //     burst.extend(msg(
-    //         device,
-    //         WlDataControlDeviceEvents::DataOffer.into(),
-    //         &primary.to_ne_bytes(),
-    //     ));
-    //     burst.extend(msg(
-    //         primary,
-    //         WlDataControlOfferEvents::Offer.into(),
-    //         &wl_str("text/plain"),
-    //     ));
-    //     burst.extend(msg(
-    //         device,
-    //         WlDataControlDeviceEvents::PrimarySelection.into(),
-    //         &primary.to_ne_bytes(),
-    //     ));
-    //     burst.extend(msg(
-    //         callback,
-    //         WlCallbackEvents::Done as u16,
-    //         &0u32.to_ne_bytes(),
-    //     ));
-    //     burst.extend(msg(
-    //         WlDisplay::TYPE_ID,
-    //         DisplayEvents::DeleteId.into(),
-    //         &callback.to_ne_bytes(),
-    //     ));
-    //     peer.write_all(&burst).unwrap();
+        // What a compositor sends right after bind + get_data_device + sync, in one write.
+        let mut burst = msg(seat, 0, &3u32.to_ne_bytes());
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &clipboard.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            clipboard,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/html"),
+        ));
+        burst.extend(msg(
+            clipboard,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/plain;charset=utf-8"),
+        ));
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::Selection.into(),
+            &clipboard.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::DataOffer.into(),
+            &primary.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            primary,
+            WlDataControlOfferEvents::Offer.into(),
+            &wl_str("text/plain"),
+        ));
+        burst.extend(msg(
+            device,
+            WlDataControlDeviceEvents::PrimarySelection.into(),
+            &primary.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            callback,
+            WlCallbackEvents::Done as u16,
+            &0u32.to_ne_bytes(),
+        ));
+        burst.extend(msg(
+            WlDisplay::TYPE_ID,
+            DisplayEvents::DeleteId.into(),
+            &callback.to_ne_bytes(),
+        ));
+        peer.write_all(&burst).unwrap();
 
-    //     let mut mimes = Vec::new();
-    //     let mut selection = None;
-    //     router
-    //         .dispatch_messages(&mut stream, |event| {
-    //             match event {
-    //                 WlEvent::DataControlOffer {
-    //                     id,
-    //                     event: DataControlOfferEvent::Offer { mime },
-    //                 } => mimes.push((id, mime.to_vec())),
-    //                 WlEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id }) => {
-    //                     selection = offer_id
-    //                 }
-    //                 WlEvent::SyncDone => return ControlFlow::Break(Ok(())),
-    //                 _ => {}
-    //             }
-    //             ControlFlow::Continue(())
-    //         })
-    //         .unwrap();
+        let mut mimes = Vec::new();
+        let mut selection = None;
+        router
+            .dispatch_messages(&mut stream, |event| {
+                match event {
+                    WlEvent::DataControlOffer {
+                        id,
+                        event: DataControlOfferEvent::Offer { mime },
+                    } => mimes.push((id, mime.to_vec())),
+                    WlEvent::DataControlDevice(DataControlDeviceEvent::Selection { offer_id }) => {
+                        selection = offer_id
+                    }
+                    WlEvent::SyncDone => return ControlFlow::Break(Ok(())),
+                    _ => {}
+                }
+                ControlFlow::Continue(())
+            })
+            .unwrap();
 
-    //     assert_eq!(selection, Some(clipboard));
-    //     assert_eq!(
-    //         mimes,
-    //         [
-    //             (clipboard, b"text/html".to_vec()),
-    //             (clipboard, b"text/plain;charset=utf-8".to_vec()),
-    //             (primary, b"text/plain".to_vec()),
-    //         ]
-    //     );
+        assert_eq!(selection, Some(clipboard));
+        assert_eq!(
+            mimes,
+            [
+                (clipboard, b"text/html".to_vec()),
+                (clipboard, b"text/plain;charset=utf-8".to_vec()),
+                (primary, b"text/plain".to_vec()),
+            ]
+        );
 
-    //     // delete_id arrived in the same read, after done: it must not be dropped.
-    //     assert!(matches!(
-    //         router.next_event(&mut stream).unwrap(),
-    //         Some(WlEvent::Ignored)
-    //     ));
-    //     assert_eq!(router.register(WlInterface::Callback).unwrap(), callback);
-    // }
+        // delete_id arrived in the same read, after done: it must not be dropped.
+        assert!(matches!(
+            router.next_event(&mut stream).unwrap(),
+            Some(WlEvent::Ignored)
+        ));
+        assert_eq!(
+            router
+                .register_client(WlInterface::Callback)
+                .unwrap()
+                .commit(),
+            callback
+        );
+    }
 }

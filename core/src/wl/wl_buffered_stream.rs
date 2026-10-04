@@ -6,10 +6,7 @@ pub type NextMessageResult<'a> =
 use crate::{
     log_debug,
     unix_fd_stream::{FdBuffer, UnixFdStream},
-    wl::{
-        objects::MessageHeader,
-        wl_message_writer::WlMessageWriter,
-    },
+    wl::{objects::MessageHeader, wl_message_writer::WlMessageWriter},
 };
 
 pub struct WlBufferedStream {
@@ -118,10 +115,7 @@ mod tests {
     use super::*;
     use crate::{
         FdWriteAndClose,
-        wl::objects::{
-            wl_display::{DisplayOps, WlDisplay},
-            wl_str_bytes,
-        },
+        wl::objects::wl_display::{DisplayOps, WlDisplay},
     };
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
@@ -135,136 +129,65 @@ mod tests {
         )
     }
 
-    // #[test]
-    // fn messages_round_trip_through_writer_and_reader() {
-    //     let (mut tx, mut rx) = stream_pair();
-    //     for (id, op) in [(3, DisplayOps::Sync), (4, DisplayOps::GetRegistry)] {
-    //         let start = tx.begin_message::<WlDisplay>(op, id);
-    //         tx.pack_u32(42);
-    //         tx.end_message(start);
-    //     }
-    //     tx.write().unwrap();
+    #[test]
+    fn messages_round_trip_through_writer_and_reader() {
+        let (mut tx, mut rx) = stream_pair();
+        for (id, op) in [(3, DisplayOps::Sync), (4, DisplayOps::GetRegistry)] {
+            let mut msg = tx.get_writer().begin_message::<WlDisplay>(op, id).unwrap();
+            msg.pack_u32(42).unwrap();
+            msg.end();
+        }
+        tx.write().unwrap();
 
-    //     for (id, opcode) in [(3, 0), (4, 1)] {
-    //         let (header, buf, _) = rx.read_next_message().unwrap().unwrap();
-    //         assert_eq!(
-    //             (header.object_id, header.opcode, header.size),
-    //             (id, opcode, 12)
-    //         );
-    //         assert_eq!(u32::from_ne_bytes(buf[..4].try_into().unwrap()), 42);
-    //     }
-    // }
+        for (id, opcode) in [(3, 0), (4, 1)] {
+            let (header, buf, _) = rx.read_next_message().unwrap().unwrap();
+            assert_eq!(
+                (header.object_id, header.opcode, header.size),
+                (id, opcode, 12)
+            );
+            assert_eq!(u32::from_ne_bytes(buf[..4].try_into().unwrap()), 42);
+        }
+    }
 
-    // #[test]
-    // fn header_second_word_is_size_high_opcode_low() {
-    //     let (mut tx, _rx) = stream_pair();
-    //     let start = tx.begin_message::<WlDisplay>(DisplayOps::GetRegistry, 1);
-    //     tx.pack_u32(2);
-    //     tx.end_message(start);
-    //     let word = u32::from_ne_bytes(tx.write_buffer[4..8].try_into().unwrap());
-    //     assert_eq!(word, 12 << 16 | 1);
+    #[test]
+    fn fds_arrive_in_order_and_sender_copies_are_closed() {
+        let (mut tx, mut rx) = stream_pair();
+        let (first_read, first_write) = UnixStream::pair().unwrap();
+        let (second_read, second_write) = UnixStream::pair().unwrap();
+        for fd in [first_write, second_write] {
+            let mut msg = tx
+                .get_writer()
+                .begin_message::<WlDisplay>(DisplayOps::Sync, 7)
+                .unwrap();
+            msg.pack_fd(fd.into()).unwrap();
+            msg.end();
+        }
+        tx.write().unwrap();
 
-    //     let mut header = [0u8; 8];
-    //     header[..4].copy_from_slice(&7u32.to_ne_bytes());
-    //     header[4..].copy_from_slice(&(20u32 << 16 | 3).to_ne_bytes());
-    //     let parsed = MessageHeader::parse(&header);
-    //     assert_eq!((parsed.object_id, parsed.opcode, parsed.size), (7, 3, 20));
-    // }
+        let payloads: [&[u8]; 2] = [b"first", b"second"];
+        for payload in payloads {
+            let (header, _, fds) = rx.read_next_message().unwrap().unwrap();
+            // fd arguments add no bytes to the message
+            assert_eq!(
+                (header.object_id, header.size),
+                (7, MessageHeader::WL_HEADER_SIZE)
+            );
+            fds.pop_last_in_fd()
+                .unwrap()
+                .fd_write_and_close(payload)
+                .unwrap();
+        }
 
-    // #[test]
-    // fn fds_arrive_in_order_and_sender_copies_are_closed() {
-    //     let (mut tx, mut rx) = stream_pair();
-    //     let (first_read, first_write) = UnixStream::pair().unwrap();
-    //     let (second_read, second_write) = UnixStream::pair().unwrap();
-    //     for fd in [first_write, second_write] {
-    //         let start = tx.begin_message::<WlDisplay>(DisplayOps::Sync, 7);
-    //         tx.pack_fd(fd.into()).unwrap();
-    //         tx.end_message(start);
-    //     }
-    //     tx.write().unwrap();
-
-    //     let payloads: [&[u8]; 2] = [b"first", b"second"];
-    //     for payload in payloads {
-    //         let (header, _, fds) = rx.read_next_message().unwrap().unwrap();
-    //         // fd arguments add no bytes to the message
-    //         assert_eq!(
-    //             (header.object_id, header.size),
-    //             (7, MessageHeader::WL_HEADER_SIZE)
-    //         );
-    //         fds.pop_last_in_fd()
-    //             .unwrap()
-    //             .fd_write_and_close(payload)
-    //             .unwrap();
-    //     }
-
-    //     for (mut reader, expected) in [first_read, second_read].into_iter().zip(payloads) {
-    //         // Times out instead of hanging if tx kept its copy of the write end open.
-    //         reader
-    //             .set_read_timeout(Some(Duration::from_secs(1)))
-    //             .unwrap();
-    //         let mut got = Vec::new();
-    //         reader.read_to_end(&mut got).unwrap();
-    //         assert_eq!(got, expected);
-    //     }
-    // }
-
-    // #[test]
-    // fn strings_are_length_prefixed_nul_terminated_and_padded() {
-    //     let (mut s, _peer) = stream_pair();
-    //     for text in ["", "a", "abc", "abcd", "text/plain"] {
-    //         s.write_cursor = 0;
-    //         s.pack_str(text).unwrap();
-    //         let encoded = &s.write_buffer[..s.write_cursor];
-    //         assert_eq!(
-    //             encoded.len(),
-    //             4 + (text.len() + 1).next_multiple_of(4),
-    //             "{text:?}"
-    //         );
-    //         assert_eq!(encoded[..4], ((text.len() + 1) as u32).to_ne_bytes());
-    //         assert_eq!(&encoded[4..4 + text.len()], text.as_bytes());
-    //         assert!(encoded[4 + text.len()..].iter().all(|&b| b == 0));
-    //     }
-    // }
-
-    // #[test]
-    // fn pack_str_that_does_not_fit_is_an_error_and_writes_nothing() {
-    //     let (mut s, _peer) = stream_pair();
-    //     assert!(s.pack_str(&"x".repeat(s.write_buffer.len())).is_err());
-    //     assert_eq!(s.write_cursor, 0);
-    // }
-
-    // #[test]
-    // fn pack_str_that_exactly_fills_the_buffer_fits() {
-    //     let (mut s, _peer) = stream_pair();
-    //     // Length prefix (4) + text + NUL (1) == buffer length, no padding needed.
-    //     let text = "x".repeat(s.write_buffer.len() - 4 - 1);
-    //     s.pack_str(&text).unwrap();
-    //     assert_eq!(s.write_cursor, s.write_buffer.len());
-    // }
-
-    // #[test]
-    // fn compile_time_wl_str_matches_runtime_encoding() {
-    //     let (mut s, _peer) = stream_pair();
-    //     let consts = [
-    //         wl_str_bytes!("a"),
-    //         wl_str_bytes!("abcd"),
-    //         wl_str_bytes!("wl_seat"),
-    //         wl_str_bytes!("ext_data_control_manager_v1"),
-    //     ];
-    //     for wl_str in &consts {
-    //         s.write_cursor = 0;
-    //         s.pack_str(wl_str.str).unwrap();
-    //         let runtime = s.write_buffer[..s.write_cursor].to_vec();
-    //         s.write_cursor = 0;
-    //         s.pack_wl_str(wl_str);
-    //         assert_eq!(
-    //             s.write_buffer[..s.write_cursor],
-    //             runtime[..],
-    //             "{}",
-    //             wl_str.str
-    //         );
-    //     }
-    // }
+        for (mut reader, expected) in [first_read, second_read].into_iter().zip(payloads) {
+            // Times out instead of hanging if tx kept its copy of the write end open.
+            reader
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+            let mut got = Vec::new();
+            reader.read_to_end(&mut got).unwrap();
+            assert_eq!(got, expected);
+        }
+    }
 
     #[test]
     fn message_split_across_two_reads_is_returned() {
