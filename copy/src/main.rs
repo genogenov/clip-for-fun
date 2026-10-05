@@ -71,7 +71,7 @@ fn run() -> io::Result<()> {
             ControlFlow::Continue(())
         }
         WlEvent::DataControlSource {
-            id:_,
+            id: _,
             event: WlDataControlSourceEvent::Cancelled,
         } => {
             log_debug!("Received cancelled event. Exiting...");
