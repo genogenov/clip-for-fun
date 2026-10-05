@@ -58,7 +58,10 @@ fn run() -> io::Result<()> {
     mgr.sync()?;
 
     mgr.dispatch_messages(&mut |wl_event| match wl_event {
-        WlEvent::DataControlSource{ id, event: WlDataControlSourceEvent::Send { mime_type: _, fd } } => {
+        WlEvent::DataControlSource {
+            id,
+            event: WlDataControlSourceEvent::Send { mime_type: _, fd },
+        } => {
             log_debug!("Received send event for id {} with fd {:?}", id, fd);
 
             // Serve to pasting client via fd it sent.
@@ -67,7 +70,10 @@ fn run() -> io::Result<()> {
             }
             ControlFlow::Continue(())
         }
-        WlEvent::DataControlSource{ id, event: WlDataControlSourceEvent::Cancelled } => {
+        WlEvent::DataControlSource {
+            id,
+            event: WlDataControlSourceEvent::Cancelled,
+        } => {
             log_debug!("Received cancelled event for id {}. Exiting...", id);
             ControlFlow::Break(Ok(()))
         }

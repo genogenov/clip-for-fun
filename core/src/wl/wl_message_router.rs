@@ -3,10 +3,8 @@ use crate::{
     unix_fd_stream::InFdBuffer,
     wl::{
         objects::{
-            MessageHeader,
-            wl_data_control_device::DataControlDeviceEvent,
-            wl_data_offer::DataControlOfferEvent,
-            wl_data_source::WlDataControlSourceEvent,
+            MessageHeader, wl_data_control_device::DataControlDeviceEvent,
+            wl_data_offer::DataControlOfferEvent, wl_data_source::WlDataControlSourceEvent,
         },
         wl_buffered_stream::WlStreamReader,
     },
@@ -40,7 +38,7 @@ pub enum Slot {
 }
 
 pub enum WlEvent<'a> {
-    DataControlSource{
+    DataControlSource {
         id: u32,
         event: WlDataControlSourceEvent<'a>,
     },
@@ -97,15 +95,9 @@ impl<'a> Drop for WlPendingId<'a> {
     }
 }
 
-pub trait WlMessageHandler:
-    FnMut(WlEvent<'_>) -> ControlFlow<Result<()>>
-{
-}
+pub trait WlMessageHandler: FnMut(WlEvent<'_>) -> ControlFlow<Result<()>> {}
 
-impl<T> WlMessageHandler for T where
-    T: FnMut(WlEvent<'_>) -> ControlFlow<Result<()>>
-{
-}
+impl<T> WlMessageHandler for T where T: FnMut(WlEvent<'_>) -> ControlFlow<Result<()>> {}
 
 pub enum WlEventReadResult<'a> {
     Ignored,

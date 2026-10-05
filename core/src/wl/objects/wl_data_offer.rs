@@ -56,10 +56,7 @@ impl WlDataControlOffer {
         Ok(())
     }
 
-    pub fn destroy(
-        &self,
-        writer: WlMessageWriter
-    ) -> Result<(), std::io::Error> {
+    pub fn destroy(&self, writer: WlMessageWriter) -> Result<(), std::io::Error> {
         let msg = writer
             .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Destroy, self.local_id)?;
         msg.end();

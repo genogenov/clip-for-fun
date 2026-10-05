@@ -157,12 +157,10 @@ impl WlSessionManager {
                             target_object_id,
                             error_code,
                             error_msg,
-                        } => {
-                            ControlFlow::Break(Err(std::io::Error::other(format!(
-                                "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
-                                target_object_id, error_code, error_msg
-                            ))))
-                        }
+                        } => ControlFlow::Break(Err(std::io::Error::other(format!(
+                            "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
+                            target_object_id, error_code, error_msg
+                        )))),
                         DisplayEvent::DeleteId { id } => {
                             log_debug!("Deleting WL client object id: {}", id);
                             router.free_client(id);
@@ -218,7 +216,12 @@ impl WlSessionManager {
                                     "Destroying prior primary selection: {:?}",
                                     prior_primary_selection
                                 );
-                                match Self::drop_offer(router, tracker, writer, prior_primary_selection) {
+                                match Self::drop_offer(
+                                    router,
+                                    tracker,
+                                    writer,
+                                    prior_primary_selection,
+                                ) {
                                     Ok(it) => it,
                                     Err(err) => return ControlFlow::Break(Err(err)),
                                 };
@@ -468,10 +471,8 @@ mod tests {
     const DEVICE_ID: u32 = 6;
 
     fn session_with_device() -> (WlSessionManager, UnixStream) {
-        let (stream, compositor) = compositor_with_globals(&[
-            (1, "wl_seat", 1),
-            (54, "ext_data_control_manager_v1", 1),
-        ]);
+        let (stream, compositor) =
+            compositor_with_globals(&[(1, "wl_seat", 1), (54, "ext_data_control_manager_v1", 1)]);
         (WlSessionManager::initialize(stream).unwrap(), compositor)
     }
 
@@ -592,10 +593,16 @@ mod tests {
 
         // What a compositor sends right after bind + get_data_device + sync, in one write.
         let mut burst = msg(SEAT_ID, 0, &3u32.to_ne_bytes());
-        burst.extend(device_event(WlDataControlDeviceEvents::DataOffer, clipboard));
+        burst.extend(device_event(
+            WlDataControlDeviceEvents::DataOffer,
+            clipboard,
+        ));
         burst.extend(mime_offer(clipboard, "text/html"));
         burst.extend(mime_offer(clipboard, "text/plain;charset=utf-8"));
-        burst.extend(device_event(WlDataControlDeviceEvents::Selection, clipboard));
+        burst.extend(device_event(
+            WlDataControlDeviceEvents::Selection,
+            clipboard,
+        ));
         burst.extend(device_event(WlDataControlDeviceEvents::DataOffer, primary));
         burst.extend(mime_offer(primary, "text/plain"));
         burst.extend(device_event(

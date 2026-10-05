@@ -94,7 +94,11 @@ impl WlDataControlDevice {
         Ok(())
     }
 
-    pub fn set_primary_selection(&self, writer: WlMessageWriter, source_id: u32) -> std::io::Result<()> {
+    pub fn set_primary_selection(
+        &self,
+        writer: WlMessageWriter,
+        source_id: u32,
+    ) -> std::io::Result<()> {
         let mut msg = writer.begin_message::<WlDataControlDevice>(
             WlDataControlDeviceOps::SetPrimarySelection,
             self.local_id,

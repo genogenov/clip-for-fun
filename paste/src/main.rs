@@ -1,9 +1,15 @@
 use std::{
-    env, ffi::OsString, io::{self, ErrorKind}, ops::ControlFlow, path::PathBuf, process::ExitCode,
+    env,
+    ffi::OsString,
+    io::{self, ErrorKind},
+    ops::ControlFlow,
+    path::PathBuf,
+    process::ExitCode,
 };
 
 use clip_for_fun_core::{
-    Colors, LOGGER, WlBufferedStream, WlDataControlOffer, WlEvent, WlSessionManager, log_debug, log_error,
+    Colors, LOGGER, WlBufferedStream, WlDataControlOffer, WlEvent, WlSessionManager, log_debug,
+    log_error,
 };
 
 fn main() -> ExitCode {
@@ -40,11 +46,9 @@ fn run() -> io::Result<()> {
     log_debug!("Starting Paste loop");
     mgr.sync()?;
 
-    mgr.dispatch_messages(&mut |ev| {
-        match ev {
-            WlEvent::SyncDone => ControlFlow::Break(Ok(())),
-            _ => ControlFlow::Continue(()),
-        }
+    mgr.dispatch_messages(&mut |ev| match ev {
+        WlEvent::SyncDone => ControlFlow::Break(Ok(())),
+        _ => ControlFlow::Continue(()),
     })?;
 
     let Some(slot) = mgr.get_selected_slot() else {
