@@ -5,7 +5,6 @@ use crate::{
     wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,
-        wl_message_router::WlMessageRouter,
         wl_message_writer::WlMessageWriter,
     },
 };

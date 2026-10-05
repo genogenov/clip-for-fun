@@ -14,8 +14,8 @@ use crate::{
         },
         wl_buffered_stream::WlStreamWriter,
         wl_message_router::{
-            Slot, WlEventReadResult,
-            WlInterface::{self, DataControlDevice},
+            WlEventReadResult,
+            WlInterface::{self},
             WlMessageHandler,
         },
         wl_message_writer::WlMessageWriter,
@@ -145,7 +145,7 @@ impl WlSessionManager {
                         log_debug!("Received done event from callback");
                         return ControlFlow::Continue(Some(WlEvent::SyncDone));
                     }
-                    return ControlFlow::Break(Err(Error::other("Unknown opcode")));
+                    ControlFlow::Break(Err(Error::other("Unknown opcode")))
                 }
                 WlInterface::Display => {
                     let Some(display_event) = WlDisplay::parse_message(header.opcode, buffer)
@@ -158,15 +158,15 @@ impl WlSessionManager {
                             error_code,
                             error_msg,
                         } => {
-                            return ControlFlow::Break(Err(std::io::Error::other(format!(
+                            ControlFlow::Break(Err(std::io::Error::other(format!(
                                 "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
                                 target_object_id, error_code, error_msg
-                            ))));
+                            ))))
                         }
                         DisplayEvent::DeleteId { id } => {
                             log_debug!("Deleting WL client object id: {}", id);
                             router.free_client(id);
-                            return ControlFlow::Continue(Some(WlEvent::Ignored));
+                            ControlFlow::Continue(Some(WlEvent::Ignored))
                         }
                     }
                 }
@@ -231,9 +231,9 @@ impl WlSessionManager {
                             ))));
                         }
                     }
-                    return ControlFlow::Continue(Some(WlEvent::DataControlDevice(
+                    ControlFlow::Continue(Some(WlEvent::DataControlDevice(
                         data_control_device_event,
-                    )));
+                    )))
                 }
                 WlInterface::DataControlSource => {
                     return ControlFlow::Continue(Some(WlEvent::DataControlSource {
@@ -256,14 +256,14 @@ impl WlSessionManager {
                             },
                             Err(err) => return ControlFlow::Break(Err(err)),
                         };
-                    return ControlFlow::Continue(Some(WlEvent::DataControlOffer {
+                    ControlFlow::Continue(Some(WlEvent::DataControlOffer {
                         id: header.object_id,
                         event: data_control_offer_event,
-                    }));
+                    }))
                 }
                 WlInterface::Registry => {
                     registry.add_interface(&header, &mut WlMessageReader::new(buffer));
-                    return ControlFlow::Continue(None);
+                    ControlFlow::Continue(None)
                 }
             },
             WlEventReadResult::Ignored => ControlFlow::Continue(None),

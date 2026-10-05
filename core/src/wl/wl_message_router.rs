@@ -3,17 +3,16 @@ use crate::{
     unix_fd_stream::InFdBuffer,
     wl::{
         objects::{
-            MessageHeader, WlCallbackEvents,
-            wl_data_control_device::{DataControlDeviceEvent, WlDataControlDevice},
-            wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
-            wl_data_source::{WlDataControlSource, WlDataControlSourceEvent},
-            wl_display::{DisplayEvent, WlDisplay},
+            MessageHeader,
+            wl_data_control_device::DataControlDeviceEvent,
+            wl_data_offer::DataControlOfferEvent,
+            wl_data_source::WlDataControlSourceEvent,
         },
-        wl_buffered_stream::{NextMessageResult, WlStreamReader},
+        wl_buffered_stream::WlStreamReader,
     },
 };
 use std::{
-    io::{Error, ErrorKind, Result},
+    io::{Error, Result},
     ops::ControlFlow,
 };
 

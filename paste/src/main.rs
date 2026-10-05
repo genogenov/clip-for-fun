@@ -3,7 +3,7 @@ use std::{
 };
 
 use clip_for_fun_core::{
-    Colors, LOGGER, WlBufferedStream, WlDataControlOffer, WlEvent, WlOfferTracker, WlSessionManager, log_debug, log_error,
+    Colors, LOGGER, WlBufferedStream, WlDataControlOffer, WlEvent, WlSessionManager, log_debug, log_error,
 };
 
 fn main() -> ExitCode {

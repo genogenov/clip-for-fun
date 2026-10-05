@@ -1,10 +1,6 @@
-use std::{io, ops::ControlFlow, thread::ThreadId};
+use std::io;
 
-use crate::{
-    DataControlDeviceEvent, DataControlOfferEvent, WlDataControlOffer, WlEvent, WlMessageRouter,
-    WlSessionManager, log_debug,
-    wl::wl_message_router::WlInterface::{self, DataControlOffer},
-};
+use crate::log_debug;
 
 pub const TEXT_PLAIN_UTF8: &str = "text/plain;charset=utf-8";
 pub const UTF8_STRING: &str = "UTF8_STRING";
@@ -141,8 +137,6 @@ impl WlOfferTracker {
             KNOWN_MIME_TYPES[rank],
         );
         best_offer.preferred_rank = Some(rank);
-
-        return;
     }
 
     pub fn selection(&mut self, offer_id: &Option<u32>) -> Result<Option<u32>, std::io::Error> {
