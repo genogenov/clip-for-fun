@@ -1,22 +1,42 @@
 use std::path::Path;
 
 pub type NextMessageResult<'a> =
-    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut FdBuffer)>>;
+    std::io::Result<Option<(MessageHeader, &'a [u8], &'a mut InFdBuffer)>>;
 
 use crate::{
     log_debug,
-    unix_fd_stream::{FdBuffer, UnixFdStream},
+    unix_fd_stream::{InFdBuffer, OutFdBuffer, UnixFdStream},
     wl::{objects::MessageHeader, wl_message_writer::WlMessageWriter},
 };
 
 pub struct WlBufferedStream {
-    stream: UnixFdStream,
-    write_buffer: [u8; 1024],
-    write_cursor: usize,
-    read_buffer: [u8; 4096],
-    read_cursor: usize,
-    bytes_read: usize,
-    fd: FdBuffer,
+    socket: UnixFdStream,
+    rx: ReadBuffer,
+    tx: WriteBuffer,
+}
+
+struct ReadBuffer {
+    buf: [u8; 4096],
+    cursor: usize,
+    filled: usize,
+    fds: InFdBuffer,
+}
+
+struct WriteBuffer {
+    buf: [u8; 1024],
+    cursor: usize,
+    fds: OutFdBuffer,
+}
+
+// Borrowed halves of a WlBufferedStream: an event from the reader can stay alive while the writer queues requests.
+pub struct WlStreamReader<'a> {
+    socket: &'a UnixFdStream,
+    rx: &'a mut ReadBuffer,
+}
+
+pub struct WlStreamWriter<'a> {
+    socket: &'a UnixFdStream,
+    tx: &'a mut WriteBuffer,
 }
 
 impl WlBufferedStream {
@@ -24,25 +44,72 @@ impl WlBufferedStream {
         Ok(Self::new(UnixFdStream::connect(socket_path)?))
     }
 
-    pub(crate) fn new(stream: UnixFdStream) -> Self {
+    pub(crate) fn new(socket: UnixFdStream) -> Self {
         Self {
-            stream,
-            write_buffer: [0u8; 1024],
-            write_cursor: 0,
-            read_buffer: [0u8; 4096],
-            read_cursor: 0,
-            bytes_read: 0,
-            fd: FdBuffer::new(),
+            socket,
+            rx: ReadBuffer {
+                buf: [0u8; 4096],
+                cursor: 0,
+                filled: 0,
+                fds: InFdBuffer::new(),
+            },
+            tx: WriteBuffer {
+                buf: [0u8; 1024],
+                cursor: 0,
+                fds: OutFdBuffer::new(),
+            },
         }
     }
 
+    pub fn split(&mut self) -> (WlStreamReader<'_>, WlStreamWriter<'_>) {
+        (
+            WlStreamReader {
+                socket: &self.socket,
+                rx: &mut self.rx,
+            },
+            WlStreamWriter {
+                socket: &self.socket,
+                tx: &mut self.tx,
+            },
+        )
+    }
+
     pub fn read_next_message(&mut self) -> NextMessageResult<'_> {
+        self.rx.next_message(&self.socket)
+    }
+
+    pub fn write(&mut self) -> std::io::Result<()> {
+        self.tx.flush(&self.socket)
+    }
+
+    pub fn get_writer(&mut self) -> WlMessageWriter<'_> {
+        self.tx.message_writer()
+    }
+}
+
+impl WlStreamReader<'_> {
+    pub fn read_next_message(&mut self) -> NextMessageResult<'_> {
+        self.rx.next_message(self.socket)
+    }
+}
+
+impl WlStreamWriter<'_> {
+    pub fn write(&mut self) -> std::io::Result<()> {
+        self.tx.flush(self.socket)
+    }
+
+    pub fn get_writer(&mut self) -> WlMessageWriter<'_> {
+        self.tx.message_writer()
+    }
+}
+
+impl ReadBuffer {
+    fn next_message<'a>(&'a mut self, socket: &UnixFdStream) -> NextMessageResult<'a> {
         loop {
-            if let Some(h) = self.read_buffer[self.read_cursor..self.bytes_read].first_chunk::<8>()
-            {
+            if let Some(h) = self.buf[self.cursor..self.filled].first_chunk::<8>() {
                 let header = MessageHeader::parse(h);
 
-                if header.size > self.read_buffer.len() as u16
+                if header.size > self.buf.len() as u16
                     || header.size < MessageHeader::WL_HEADER_SIZE
                 {
                     return Err(std::io::Error::other(format!(
@@ -52,29 +119,25 @@ impl WlBufferedStream {
                 }
                 // Only return the message once all of it is in the buffer; otherwise fall
                 // through and read more bytes from the socket.
-                if self.read_cursor + header.size as usize <= self.bytes_read {
-                    let message_body_offset =
-                        self.read_cursor + MessageHeader::WL_HEADER_SIZE as usize;
-                    self.read_cursor += header.size as usize;
+                if self.cursor + header.size as usize <= self.filled {
+                    let message_body_offset = self.cursor + MessageHeader::WL_HEADER_SIZE as usize;
+                    self.cursor += header.size as usize;
                     return Ok(Some((
                         header,
-                        &self.read_buffer[message_body_offset..self.read_cursor],
-                        &mut self.fd,
+                        &self.buf[message_body_offset..self.cursor],
+                        &mut self.fds,
                     )));
                 }
             }
 
             // we may have read a partial message, so we need to move the remaining bytes to the beginning of the buffer
             let mut remaining_bytes = 0;
-            if self.read_cursor < self.bytes_read {
-                remaining_bytes = self.bytes_read - self.read_cursor;
-                self.read_buffer
-                    .copy_within(self.read_cursor..self.bytes_read, 0);
+            if self.cursor < self.filled {
+                remaining_bytes = self.filled - self.cursor;
+                self.buf.copy_within(self.cursor..self.filled, 0);
             }
 
-            let new_bytes_read = self
-                .stream
-                .read(&mut self.read_buffer[remaining_bytes..], &mut self.fd)?;
+            let new_bytes_read = socket.read(&mut self.buf[remaining_bytes..], &mut self.fds)?;
             if new_bytes_read == 0 {
                 // EOF reached, no more messages to read.. if we have remaining bytes it means we have a partial message that we cant parse.
                 if remaining_bytes > 0 {
@@ -85,28 +148,26 @@ impl WlBufferedStream {
                 }
                 return Ok(None);
             }
-            self.bytes_read = remaining_bytes + new_bytes_read;
-            self.read_cursor = 0;
+            self.filled = remaining_bytes + new_bytes_read;
+            self.cursor = 0;
         }
     }
+}
 
-    #[inline(always)]
-    pub fn write(&mut self) -> std::io::Result<()> {
-        if self.write_cursor == 0 {
+impl WriteBuffer {
+    fn flush(&mut self, socket: &UnixFdStream) -> std::io::Result<()> {
+        if self.cursor == 0 {
             return Ok(());
         }
-        log_debug!("Writing {} bytes to the stream", self.write_cursor);
-        let result = self.stream.write(
-            &self.write_buffer[..self.write_cursor],
-            self.fd.peek_out_fds(),
-        );
-        self.write_cursor = 0;
-        self.fd.clear_and_close_out_fds();
+        log_debug!("Writing {} bytes to the stream", self.cursor);
+        let result = socket.write(&self.buf[..self.cursor], self.fds.peek_out_fds());
+        self.cursor = 0;
+        self.fds.clear_and_close_out_fds();
         result
     }
 
-    pub fn get_writer<'a>(&'a mut self) -> WlMessageWriter<'a> {
-        WlMessageWriter::new(&mut self.write_buffer, &mut self.fd, &mut self.write_cursor)
+    fn message_writer(&mut self) -> WlMessageWriter<'_> {
+        WlMessageWriter::new(&mut self.buf, &mut self.fds, &mut self.cursor)
     }
 }
 

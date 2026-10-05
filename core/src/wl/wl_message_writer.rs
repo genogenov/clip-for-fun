@@ -1,7 +1,7 @@
 use std::{mem::forget, os::fd::OwnedFd};
 
 use crate::{
-    unix_fd_stream::FdBuffer,
+    unix_fd_stream::OutFdBuffer,
     wl::{
         objects::{MessageHeader, WlObject, WlStr},
         wl_message_router::WlPendingId,
@@ -12,7 +12,7 @@ pub struct WlMessageWriter<'a> {
     buf: &'a mut [u8],
     write_position: &'a mut usize,
     start_position: usize,
-    fds: &'a mut FdBuffer,
+    fds: &'a mut OutFdBuffer,
     fd_count: usize,
 }
 
@@ -119,7 +119,7 @@ impl<'a> WlMessageWriterGuard<'a> {
 }
 
 impl<'a> WlMessageWriter<'a> {
-    pub fn new(buf: &'a mut [u8], fds: &'a mut FdBuffer, write_position: &'a mut usize) -> Self {
+    pub fn new(buf: &'a mut [u8], fds: &'a mut OutFdBuffer, write_position: &'a mut usize) -> Self {
         let start = *write_position;
         Self {
             buf,
@@ -163,7 +163,7 @@ mod tests {
     struct Buffers {
         buf: [u8; BUF_LEN],
         cursor: usize,
-        fds: FdBuffer,
+        fds: OutFdBuffer,
     }
 
     impl Buffers {
@@ -172,7 +172,7 @@ mod tests {
             Self {
                 buf: [0xAA; BUF_LEN],
                 cursor: 0,
-                fds: FdBuffer::new(),
+                fds: OutFdBuffer::new(),
             }
         }
 

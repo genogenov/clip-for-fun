@@ -1,5 +1,5 @@
 use crate::{
-    unix_fd_stream::FdBuffer,
+    unix_fd_stream::InFdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,
@@ -18,6 +18,10 @@ impl WlObject for WlDataControlDevice {
 wl_enum! {
     pub enum WlDataControlDeviceOps {
         SetSelection = 0,
+
+        Destroy = 1,
+
+        SetPrimarySelection = 2,
     }
 }
 
@@ -46,7 +50,7 @@ impl WlDataControlDevice {
     pub fn parse_message(
         opcode: u16,
         buffer: &[u8],
-        _fds: &mut FdBuffer,
+        _fds: &mut InFdBuffer,
     ) -> std::io::Result<DataControlDeviceEvent> {
         let mut reader = WlMessageReader::new(buffer);
         match opcode {
@@ -83,6 +87,16 @@ impl WlDataControlDevice {
     pub fn set_selection(&self, writer: WlMessageWriter, source_id: u32) -> std::io::Result<()> {
         let mut msg = writer.begin_message::<WlDataControlDevice>(
             WlDataControlDeviceOps::SetSelection,
+            self.local_id,
+        )?;
+        msg.pack_u32(source_id)?;
+        msg.end();
+        Ok(())
+    }
+
+    pub fn set_primary_selection(&self, writer: WlMessageWriter, source_id: u32) -> std::io::Result<()> {
+        let mut msg = writer.begin_message::<WlDataControlDevice>(
+            WlDataControlDeviceOps::SetPrimarySelection,
             self.local_id,
         )?;
         msg.pack_u32(source_id)?;

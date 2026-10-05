@@ -72,10 +72,13 @@ unsafe extern "C" {
     // fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
 }
 
-pub struct FdBuffer {
+pub struct InFdBuffer {
     in_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
     in_fd_count: usize,
     in_fds_cursor: usize,
+}
+
+pub struct OutFdBuffer {
     out_fds: [Option<OwnedFd>; FD_BUFFER_LEN],
     out_fd_count: usize,
 }
@@ -93,14 +96,12 @@ impl FdWriteAndClose for OwnedFd {
         }
     }
 }
-impl FdBuffer {
+impl InFdBuffer {
     pub fn new() -> Self {
         Self {
             in_fds: [const { None }; FD_BUFFER_LEN],
             in_fd_count: 0,
             in_fds_cursor: 0,
-            out_fds: [const { None }; FD_BUFFER_LEN],
-            out_fd_count: 0,
         }
     }
 
@@ -125,6 +126,15 @@ impl FdBuffer {
         self.in_fds[(self.in_fds_cursor + self.in_fd_count) % self.in_fds.len()] = Some(fd);
         self.in_fd_count += 1;
         Ok(())
+    }
+}
+
+impl OutFdBuffer {
+    pub fn new() -> Self {
+        Self {
+            out_fds: [const { None }; FD_BUFFER_LEN],
+            out_fd_count: 0,
+        }
     }
 
     pub fn push_out_fd(&mut self, fd: OwnedFd) -> std::io::Result<()> {
@@ -177,7 +187,7 @@ impl UnixFdStream {
         Ok(UnixStream::connect(path)?.into())
     }
 
-    pub fn read(&mut self, buffer: &mut [u8], fd_buffer: &mut FdBuffer) -> std::io::Result<usize> {
+    pub fn read(&self, buffer: &mut [u8], fd_buffer: &mut InFdBuffer) -> std::io::Result<usize> {
         let mut iovec = iovec {
             iov_base: buffer.as_mut_ptr(),
             iov_len: buffer.len(),
@@ -244,7 +254,7 @@ impl UnixFdStream {
         }
     }
 
-    pub fn write(&mut self, data: &[u8], fds: &[Option<OwnedFd>]) -> std::io::Result<()> {
+    pub fn write(&self, data: &[u8], fds: &[Option<OwnedFd>]) -> std::io::Result<()> {
         if fds.is_empty() {
             self.send_all(&mut [], data)
         } else if fds.len() > FD_BUFFER_LEN {
@@ -271,7 +281,7 @@ impl UnixFdStream {
         }
     }
 
-    fn send_all(&mut self, msg_control: &mut [u8], buff: &[u8]) -> std::io::Result<()> {
+    fn send_all(&self, msg_control: &mut [u8], buff: &[u8]) -> std::io::Result<()> {
         let mut total_bytes_sent = 0;
         let (mut control, mut ctrl_length) = match msg_control {
             [] => (ptr::null_mut(), 0),
@@ -340,7 +350,7 @@ mod tests {
 
     #[test]
     fn in_fds_pop_in_fifo_order_across_wraparound() {
-        let mut buf = FdBuffer::new();
+        let mut buf = InFdBuffer::new();
         // 3 does not divide FD_BUFFER_LEN, so some rounds straddle the wrap point.
         for _ in 0..FD_BUFFER_LEN {
             let fds: [OwnedFd; 3] = std::array::from_fn(|_| dev_null());
@@ -357,7 +367,7 @@ mod tests {
 
     #[test]
     fn in_fds_overflow_is_an_error() {
-        let mut buf = FdBuffer::new();
+        let mut buf = InFdBuffer::new();
         for _ in 0..FD_BUFFER_LEN {
             buf.push_in_fd(dev_null()).unwrap();
         }
@@ -368,10 +378,12 @@ mod tests {
     fn queued_fds_are_closed_when_the_buffer_is_dropped() {
         let (keep_in, queued_in) = UnixStream::pair().unwrap();
         let (keep_out, queued_out) = UnixStream::pair().unwrap();
-        let mut buf = FdBuffer::new();
-        buf.push_in_fd(queued_in.into()).unwrap();
-        buf.push_out_fd(queued_out.into()).unwrap();
-        drop(buf);
+        let mut in_fds = InFdBuffer::new();
+        let mut out_fds = OutFdBuffer::new();
+        in_fds.push_in_fd(queued_in.into()).unwrap();
+        out_fds.push_out_fd(queued_out.into()).unwrap();
+        drop(in_fds);
+        drop(out_fds);
         assert_peer_closed(keep_in);
         assert_peer_closed(keep_out);
     }
@@ -379,7 +391,7 @@ mod tests {
     #[test]
     fn write_rejects_more_fds_than_the_control_buffer_holds() {
         let (a, _b) = UnixStream::pair().unwrap();
-        let mut stream = UnixFdStream::from(a);
+        let stream = UnixFdStream::from(a);
         let fds: Vec<Option<OwnedFd>> = (0..=FD_BUFFER_LEN).map(|_| Some(dev_null())).collect();
         assert!(stream.write(b"x", &fds).is_err());
     }

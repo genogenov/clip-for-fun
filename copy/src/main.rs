@@ -47,16 +47,19 @@ fn run() -> io::Result<()> {
     log_debug!("Read {} bytes of input", input.len());
 
     let data_source = mgr.create_data_source()?;
+    // let primary_data_source = mgr.create_data_source()?;
     for mime in OFFERED_TXT_MIME_TYPES {
         data_source.offer(mgr.get_message_writer(), mime)?;
+        // primary_data_source.offer(mgr.get_message_writer(), mime)?;
     }
     mgr.set_selection(data_source.local_id)?;
+    // mgr.set_primary_selection(primary_data_source.local_id)?;
 
     mgr.sync()?;
 
-    mgr.dispatch_messages(|wl_event| match wl_event {
-        WlEvent::DataControlSource(WlDataControlSourceEvent::Send { mime_type: _, fd }) => {
-            log_debug!("Received send event with fd {:?}", fd);
+    mgr.dispatch_messages(&mut |wl_event| match wl_event {
+        WlEvent::DataControlSource{ id, event: WlDataControlSourceEvent::Send { mime_type: _, fd } } => {
+            log_debug!("Received send event for id {} with fd {:?}", id, fd);
 
             // Serve to pasting client via fd it sent.
             if fd.fd_write_and_close(&input).is_err() {
@@ -64,8 +67,8 @@ fn run() -> io::Result<()> {
             }
             ControlFlow::Continue(())
         }
-        WlEvent::DataControlSource(WlDataControlSourceEvent::Cancelled) => {
-            log_debug!("Received cancelled event. Exiting...");
+        WlEvent::DataControlSource{ id, event: WlDataControlSourceEvent::Cancelled } => {
+            log_debug!("Received cancelled event for id {}. Exiting...", id);
             ControlFlow::Break(Ok(()))
         }
         _ => ControlFlow::Continue(()),

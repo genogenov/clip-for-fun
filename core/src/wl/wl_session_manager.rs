@@ -1,15 +1,33 @@
-use std::ops::ControlFlow;
+use std::{
+    io::{Error, ErrorKind},
+    ops::ControlFlow,
+};
 
 use crate::{
-    BoundInterface, DataDeviceManagerExt, ExtDataControlManagerV1, WlBufferedStream,
-    WlDataControlDevice, WlDisplay, WlEvent, WlMessageReader, WlMessageRouter, log_debug,
-    wl::{objects::wl_data_source::WlDataControlSource, wl_message_writer::WlMessageWriter},
+    BoundInterface, DataControlDeviceEvent, DataControlOfferEvent, DataDeviceManagerExt,
+    ExtDataControlManagerV1, WlBufferedStream, WlDataControlDevice, WlDataControlOffer, WlDisplay,
+    WlEvent, WlMessageReader, WlMessageRouter, WlOffer, WlOfferTracker, log_debug,
+    wl::{
+        objects::{
+            WlCallbackEvents, wl_data_source::WlDataControlSource, wl_display::DisplayEvent,
+            wl_registry::WlRegistry,
+        },
+        wl_buffered_stream::WlStreamWriter,
+        wl_message_router::{
+            Slot, WlEventReadResult,
+            WlInterface::{self, DataControlDevice},
+            WlMessageHandler,
+        },
+        wl_message_writer::WlMessageWriter,
+    },
 };
 
 pub struct WlSessionManager {
     display: WlDisplay,
     stream: WlBufferedStream,
+    registry: WlRegistry,
     router: WlMessageRouter,
+    offer_tracker: WlOfferTracker,
     local_data_device: WlDataControlDevice,
     ext_data_control_manager: BoundInterface<ExtDataControlManagerV1>,
 }
@@ -19,16 +37,19 @@ impl WlSessionManager {
         let mut display = WlDisplay::new();
         let mut router = WlMessageRouter::new();
         let mut registry = display.get_registry(stream.get_writer(), &mut router)?;
+        let mut offer_tracker = WlOfferTracker::new();
         display.schedule_sync(stream.get_writer(), &mut router)?;
         stream.write()?;
-        router.dispatch_messages(&mut stream, |event| match event {
-            WlEvent::Registry(header, buffer) => {
-                registry.add_interface(&header, &mut WlMessageReader::new(buffer));
-                ControlFlow::Continue(())
-            }
-            WlEvent::SyncDone => ControlFlow::Break(Ok(())),
-            _ => ControlFlow::Continue(()),
-        })?;
+        Self::dispatch(
+            &mut stream,
+            &mut router,
+            &mut registry,
+            &mut offer_tracker,
+            &mut |ev| match ev {
+                WlEvent::SyncDone => ControlFlow::Break(Ok(())),
+                _ => ControlFlow::Continue(()),
+            },
+        )?;
 
         log_debug!("Got registry: {:?}", registry);
 
@@ -64,8 +85,10 @@ impl WlSessionManager {
                 display,
                 stream,
                 router,
+                offer_tracker,
                 ext_data_control_manager: mgr_local,
                 local_data_device,
+                registry,
             })
         } else {
             Err(std::io::Error::other(
@@ -84,17 +107,219 @@ impl WlSessionManager {
             .set_selection(self.stream.get_writer(), source_id)
     }
 
+    pub fn set_primary_selection(&mut self, source_id: u32) -> std::io::Result<()> {
+        self.local_data_device
+            .set_primary_selection(self.stream.get_writer(), source_id)
+    }
+
     pub fn sync(&mut self) -> Result<(), std::io::Error> {
         self.display
             .schedule_sync(self.stream.get_writer(), &mut self.router)?;
         self.stream.write()
     }
 
-    pub fn dispatch_messages<F>(&mut self, f: F) -> Result<(), std::io::Error>
+    pub fn dispatch_messages<F>(&mut self, fnhandler: &mut F) -> Result<(), std::io::Error>
     where
-        F: FnMut(WlEvent) -> ControlFlow<Result<(), std::io::Error>>,
+        F: WlMessageHandler,
     {
-        self.router.dispatch_messages(&mut self.stream, f)
+        Self::dispatch(
+            &mut self.stream,
+            &mut self.router,
+            &mut self.registry,
+            &mut self.offer_tracker,
+            fnhandler,
+        )
+    }
+
+    fn handle_event<'a>(
+        router: &mut WlMessageRouter,
+        registry: &mut WlRegistry,
+        tracker: &mut WlOfferTracker,
+        writer: &mut WlStreamWriter<'_>,
+        event_result: WlEventReadResult<'a>,
+    ) -> ControlFlow<std::io::Result<()>, Option<WlEvent<'a>>> {
+        match event_result {
+            WlEventReadResult::Event(interface, header, buffer, fds) => match interface {
+                WlInterface::Callback => {
+                    if header.opcode == WlCallbackEvents::Done as u16 {
+                        log_debug!("Received done event from callback");
+                        return ControlFlow::Continue(Some(WlEvent::SyncDone));
+                    }
+                    return ControlFlow::Break(Err(Error::other("Unknown opcode")));
+                }
+                WlInterface::Display => {
+                    let Some(display_event) = WlDisplay::parse_message(header.opcode, buffer)
+                    else {
+                        return ControlFlow::Continue(Some(WlEvent::Ignored));
+                    };
+                    match display_event {
+                        DisplayEvent::Error {
+                            target_object_id,
+                            error_code,
+                            error_msg,
+                        } => {
+                            return ControlFlow::Break(Err(std::io::Error::other(format!(
+                                "Received error message from Wayland socket: target_object_id={}, error_code={}, message={}",
+                                target_object_id, error_code, error_msg
+                            ))));
+                        }
+                        DisplayEvent::DeleteId { id } => {
+                            log_debug!("Deleting WL client object id: {}", id);
+                            router.free_client(id);
+                            return ControlFlow::Continue(Some(WlEvent::Ignored));
+                        }
+                    }
+                }
+                WlInterface::Seat => ControlFlow::Continue(Some(WlEvent::Ignored)),
+                WlInterface::ExtDataControlManager => ControlFlow::Continue(Some(WlEvent::Ignored)),
+                WlInterface::ZwlrDataControlManager => {
+                    ControlFlow::Continue(Some(WlEvent::Ignored))
+                }
+                WlInterface::DataDeviceManager => ControlFlow::Continue(Some(WlEvent::Ignored)),
+                WlInterface::DataControlDevice => {
+                    let data_control_device_event =
+                        match WlDataControlDevice::parse_message(header.opcode, buffer, fds) {
+                            Ok(it) => it,
+                            Err(err) => return ControlFlow::Break(Err(err)),
+                        };
+                    match data_control_device_event {
+                        DataControlDeviceEvent::DataOffer { new_id } => {
+                            match router
+                                .register_server_object(WlInterface::DataControlOffer, new_id)
+                            {
+                                Ok(it) => it,
+                                Err(err) => return ControlFlow::Break(Err(err)),
+                            };
+                            match tracker.data_device_offer(new_id) {
+                                Ok(it) => it,
+                                Err(err) => return ControlFlow::Break(Err(err)),
+                            };
+                        }
+                        DataControlDeviceEvent::Selection { offer_id } => {
+                            if let Some(prior_selection) = match tracker.selection(&offer_id) {
+                                Ok(it) => it,
+                                Err(err) => return ControlFlow::Break(Err(err)),
+                            } {
+                                log_debug!("Destroying prior selection: {:?}", prior_selection);
+                                match Self::drop_offer(router, tracker, writer, prior_selection) {
+                                    Ok(it) => it,
+                                    Err(err) => return ControlFlow::Break(Err(err)),
+                                };
+                            }
+                        }
+                        DataControlDeviceEvent::PrimarySelection { offer_id } => {
+                            if let Some(prior_primary_selection) =
+                                match tracker.primary_selection(&offer_id) {
+                                    Ok(it) => it,
+                                    Err(err) => return ControlFlow::Break(Err(err)),
+                                }
+                            {
+                                log_debug!(
+                                    "Destroying prior primary selection: {:?}",
+                                    prior_primary_selection
+                                );
+                                match Self::drop_offer(router, tracker, writer, prior_primary_selection) {
+                                    Ok(it) => it,
+                                    Err(err) => return ControlFlow::Break(Err(err)),
+                                };
+                            }
+                        }
+                        DataControlDeviceEvent::Finished => {
+                            return ControlFlow::Break(Err(std::io::Error::other(format!(
+                                "Received unexpected Finished event for DataControlDevice {}",
+                                header.object_id
+                            ))));
+                        }
+                    }
+                    return ControlFlow::Continue(Some(WlEvent::DataControlDevice(
+                        data_control_device_event,
+                    )));
+                }
+                WlInterface::DataControlSource => {
+                    return ControlFlow::Continue(Some(WlEvent::DataControlSource {
+                        id: header.object_id,
+                        event: match WlDataControlSource::parse_message(header.opcode, buffer, fds)
+                        {
+                            Ok(it) => it,
+                            Err(err) => return ControlFlow::Break(Err(err)),
+                        },
+                    }));
+                }
+                WlInterface::DataControlOffer => {
+                    let data_control_offer_event =
+                        match WlDataControlOffer::parse_message(header.opcode, buffer, fds) {
+                            Ok(it) => match it {
+                                DataControlOfferEvent::Offer { mime } => {
+                                    tracker.data_control_offer(header.object_id, mime);
+                                    it
+                                }
+                            },
+                            Err(err) => return ControlFlow::Break(Err(err)),
+                        };
+                    return ControlFlow::Continue(Some(WlEvent::DataControlOffer {
+                        id: header.object_id,
+                        event: data_control_offer_event,
+                    }));
+                }
+                WlInterface::Registry => {
+                    registry.add_interface(&header, &mut WlMessageReader::new(buffer));
+                    return ControlFlow::Continue(None);
+                }
+            },
+            WlEventReadResult::Ignored => ControlFlow::Continue(None),
+            WlEventReadResult::Error(error) => ControlFlow::Break(Err(error)),
+        }
+    }
+
+    fn drop_offer(
+        router: &mut WlMessageRouter,
+        tracker: &mut WlOfferTracker,
+        writer: &mut WlStreamWriter<'_>,
+        id: u32,
+    ) -> std::io::Result<()> {
+        WlDataControlOffer::new(id).destroy(writer.get_writer())?;
+        tracker.remove(id);
+        router.free_server(id)
+    }
+
+    fn dispatch<F>(
+        stream: &mut WlBufferedStream,
+        router: &mut WlMessageRouter,
+        registry: &mut WlRegistry,
+        tracker: &mut WlOfferTracker,
+        fnhandler: &mut F,
+    ) -> Result<(), std::io::Error>
+    where
+        F: WlMessageHandler,
+    {
+        log_debug!("Starting message dispatch loop");
+        let (mut reader, mut writer) = stream.split();
+        loop {
+            // Requests queued by handlers must reach the compositor before blocking on a read.
+            writer.write()?;
+
+            let Some(event) = router.next_event(&mut reader)? else {
+                break;
+            };
+            let Some(event_result) =
+                (match Self::handle_event(router, registry, tracker, &mut writer, event)
+                    .continue_ok()
+                {
+                    Ok(it) => it,
+                    Err(err) => return err,
+                })
+            else {
+                continue;
+            };
+            if let ControlFlow::Break(result) = fnhandler(event_result) {
+                return result;
+            }
+        }
+
+        Err(std::io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "Unexpected end of stream",
+        ))
     }
 
     pub fn get_message_writer(&mut self) -> WlMessageWriter<'_> {
@@ -104,6 +329,10 @@ impl WlSessionManager {
     pub fn send_messages(&mut self) -> Result<(), std::io::Error> {
         self.stream.write()
     }
+
+    pub fn get_selected_slot(&self) -> Option<&WlOffer> {
+        self.offer_tracker.get_selected_slot()
+    }
 }
 
 #[cfg(test)]
@@ -111,12 +340,15 @@ mod tests {
     use super::*;
     use crate::wl::objects::{
         WlCallbackEvents,
+        wl_data_control_device::WlDataControlDeviceEvents,
         wl_data_managers::ExtDataControlManagerOps,
-        wl_display::DisplayOps,
+        wl_data_offer::{WlDataControlOfferEvents, WlDataControlOfferOps},
+        wl_display::{DisplayEvents, DisplayOps},
         wl_registry::{RegistryEvents, RegistryOps},
     };
     use std::{
         io::{ErrorKind, Write},
+        net::Shutdown,
         os::unix::net::UnixStream,
     };
 
@@ -230,5 +462,223 @@ mod tests {
             panic!("initialized without wl_seat");
         };
         assert_eq!(err.kind(), ErrorKind::NotFound);
+    }
+
+    const SEAT_ID: u32 = 5;
+    const DEVICE_ID: u32 = 6;
+
+    fn session_with_device() -> (WlSessionManager, UnixStream) {
+        let (stream, compositor) = compositor_with_globals(&[
+            (1, "wl_seat", 1),
+            (54, "ext_data_control_manager_v1", 1),
+        ]);
+        (WlSessionManager::initialize(stream).unwrap(), compositor)
+    }
+
+    // Only the compositor-to-client direction is closed, so the client can still send requests.
+    fn send_then_eof(compositor: &mut UnixStream, events: &[u8]) {
+        compositor.write_all(events).unwrap();
+        compositor.shutdown(Shutdown::Write).unwrap();
+    }
+
+    fn dispatch_to_eof(session: &mut WlSessionManager) {
+        let err = session
+            .dispatch_messages(&mut |_| ControlFlow::Continue(()))
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnexpectedEof, "{err}");
+    }
+
+    // Closes the client and returns every offer it destroyed, in order.
+    fn destroyed_offers(session: WlSessionManager, compositor: UnixStream) -> Vec<u32> {
+        drop(session);
+        let mut requests = WlBufferedStream::new(compositor.into());
+        let mut destroyed = Vec::new();
+        while let Some((header, ..)) = requests.read_next_message().unwrap() {
+            if header.object_id >= 0xff00_0000
+                && header.opcode == u16::from(WlDataControlOfferOps::Destroy)
+            {
+                destroyed.push(header.object_id);
+            }
+        }
+        destroyed
+    }
+
+    fn device_event(event: WlDataControlDeviceEvents, arg: u32) -> Vec<u8> {
+        msg(DEVICE_ID, event.into(), &arg.to_ne_bytes())
+    }
+
+    fn mime_offer(offer: u32, mime: &str) -> Vec<u8> {
+        msg(offer, WlDataControlOfferEvents::Offer.into(), &wl_str(mime))
+    }
+
+    #[test]
+    fn dispatch_returns_on_break_and_the_next_call_sees_the_rest() {
+        let (mut session, mut compositor) = session_with_device();
+        let mut events = msg(
+            CALLBACK_ID,
+            WlCallbackEvents::Done as u16,
+            &0u32.to_ne_bytes(),
+        );
+        events.extend(msg(
+            WlDisplay::TYPE_ID,
+            DisplayEvents::DeleteId.into(),
+            &CALLBACK_ID.to_ne_bytes(),
+        ));
+        send_then_eof(&mut compositor, &events);
+
+        session
+            .dispatch_messages(&mut |ev| match ev {
+                WlEvent::SyncDone => ControlFlow::Break(Ok(())),
+                _ => ControlFlow::Continue(()),
+            })
+            .unwrap();
+        // delete_id arrived in the same read as done: it must still be handled.
+        dispatch_to_eof(&mut session);
+        assert_eq!(session.create_data_source().unwrap().local_id, CALLBACK_ID);
+    }
+
+    #[test]
+    fn a_display_error_ends_dispatch_with_its_message() {
+        let (mut session, mut compositor) = session_with_device();
+        let mut body = DEVICE_ID.to_ne_bytes().to_vec();
+        body.extend(1u32.to_ne_bytes());
+        body.extend(wl_str("invalid arguments"));
+        send_then_eof(
+            &mut compositor,
+            &msg(WlDisplay::TYPE_ID, DisplayEvents::Error.into(), &body),
+        );
+
+        let err = session
+            .dispatch_messages(&mut |_| ControlFlow::Continue(()))
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid arguments"), "{err}");
+    }
+
+    #[test]
+    fn malformed_or_unexpected_device_events_are_errors() {
+        let (mut session, mut compositor) = session_with_device();
+        let cases = [
+            ("unknown opcode", msg(DEVICE_ID, 9, &[])),
+            (
+                "missing argument",
+                msg(DEVICE_ID, WlDataControlDeviceEvents::Selection.into(), &[]),
+            ),
+            (
+                "new_id outside the server range",
+                device_event(WlDataControlDeviceEvents::DataOffer, 5),
+            ),
+            (
+                "finished",
+                msg(DEVICE_ID, WlDataControlDeviceEvents::Finished.into(), &[]),
+            ),
+        ];
+        let events: Vec<u8> = cases.iter().flat_map(|(_, m)| m.clone()).collect();
+        send_then_eof(&mut compositor, &events);
+
+        // Each error consumes only its own message, so the next dispatch reports the next case.
+        for (case, _) in cases {
+            let err = session
+                .dispatch_messages(&mut |_| ControlFlow::Continue(()))
+                .unwrap_err();
+            assert_ne!(err.kind(), ErrorKind::UnexpectedEof, "{case}");
+        }
+        dispatch_to_eof(&mut session);
+    }
+
+    #[test]
+    fn paste_burst_is_routed_per_offer_and_tracks_both_selections() {
+        let (mut session, mut compositor) = session_with_device();
+        let (clipboard, primary) = (0xff00_0000u32, 0xff00_0001u32);
+
+        // What a compositor sends right after bind + get_data_device + sync, in one write.
+        let mut burst = msg(SEAT_ID, 0, &3u32.to_ne_bytes());
+        burst.extend(device_event(WlDataControlDeviceEvents::DataOffer, clipboard));
+        burst.extend(mime_offer(clipboard, "text/html"));
+        burst.extend(mime_offer(clipboard, "text/plain;charset=utf-8"));
+        burst.extend(device_event(WlDataControlDeviceEvents::Selection, clipboard));
+        burst.extend(device_event(WlDataControlDeviceEvents::DataOffer, primary));
+        burst.extend(mime_offer(primary, "text/plain"));
+        burst.extend(device_event(
+            WlDataControlDeviceEvents::PrimarySelection,
+            primary,
+        ));
+        burst.extend(msg(
+            CALLBACK_ID,
+            WlCallbackEvents::Done as u16,
+            &0u32.to_ne_bytes(),
+        ));
+        send_then_eof(&mut compositor, &burst);
+
+        let mut mimes = Vec::new();
+        session
+            .dispatch_messages(&mut |ev| match ev {
+                WlEvent::DataControlOffer {
+                    id,
+                    event: DataControlOfferEvent::Offer { mime },
+                } => {
+                    mimes.push((id, mime.to_vec()));
+                    ControlFlow::Continue(())
+                }
+                WlEvent::SyncDone => ControlFlow::Break(Ok(())),
+                _ => ControlFlow::Continue(()),
+            })
+            .unwrap();
+
+        assert_eq!(
+            mimes,
+            [
+                (clipboard, b"text/html".to_vec()),
+                (clipboard, b"text/plain;charset=utf-8".to_vec()),
+                (primary, b"text/plain".to_vec()),
+            ]
+        );
+        let selected = session.get_selected_slot().unwrap();
+        assert_eq!(
+            (selected.id(), selected.preferred_mime()),
+            (clipboard, Some("text/plain;charset=utf-8"))
+        );
+        let selected = session.offer_tracker.get_primary_selected_slot().unwrap();
+        assert_eq!(
+            (selected.id(), selected.preferred_mime()),
+            (primary, Some("text/plain"))
+        );
+    }
+
+    #[test]
+    fn clearing_the_selection_destroys_the_previous_offer() {
+        let (mut session, mut compositor) = session_with_device();
+        let offer = 0xff00_0000;
+        let mut events = device_event(WlDataControlDeviceEvents::DataOffer, offer);
+        events.extend(device_event(WlDataControlDeviceEvents::Selection, offer));
+        events.extend(device_event(WlDataControlDeviceEvents::Selection, 0));
+        send_then_eof(&mut compositor, &events);
+
+        dispatch_to_eof(&mut session);
+        assert!(session.get_selected_slot().is_none());
+        assert_eq!(destroyed_offers(session, compositor), [offer]);
+    }
+
+    #[test]
+    fn selection_churn_destroys_each_previous_offer_and_never_runs_out_of_slots() {
+        let (mut session, mut compositor) = session_with_device();
+        // The compositor reuses an id once it is destroyed, so two ids are enough.
+        let ids = [0xff00_0000u32, 0xff00_0001];
+        // More rounds than the router (16) and the tracker (8) have slots.
+        let rounds = 40;
+        let mut events = Vec::new();
+        for round in 0..rounds {
+            let id = ids[round % 2];
+            events.extend(device_event(WlDataControlDeviceEvents::DataOffer, id));
+            events.extend(mime_offer(id, "text/plain"));
+            events.extend(device_event(
+                WlDataControlDeviceEvents::PrimarySelection,
+                id,
+            ));
+        }
+        send_then_eof(&mut compositor, &events);
+
+        dispatch_to_eof(&mut session);
+        let expected: Vec<u32> = (0..rounds - 1).map(|round| ids[round % 2]).collect();
+        assert_eq!(destroyed_offers(session, compositor), expected);
     }
 }

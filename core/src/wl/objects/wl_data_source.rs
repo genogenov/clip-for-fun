@@ -1,7 +1,7 @@
 use std::os::fd::OwnedFd;
 
 use crate::{
-    unix_fd_stream::FdBuffer,
+    unix_fd_stream::InFdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,
@@ -47,7 +47,7 @@ impl WlDataControlSource {
     pub fn parse_message<'a>(
         opcode: u16,
         buffer: &'a [u8],
-        fds: &mut FdBuffer,
+        fds: &mut InFdBuffer,
     ) -> std::io::Result<WlDataControlSourceEvent<'a>> {
         if opcode == WlDataControlSourceEvents::Send as u16 {
             let mut reader = WlMessageReader::new(buffer);

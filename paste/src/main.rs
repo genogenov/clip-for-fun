@@ -1,14 +1,9 @@
 use std::{
-    env,
-    ffi::OsString,
-    io::{self, ErrorKind},
-    path::PathBuf,
-    process::ExitCode,
+    env, ffi::OsString, io::{self, ErrorKind}, ops::ControlFlow, path::PathBuf, process::ExitCode,
 };
 
 use clip_for_fun_core::{
-    Colors, LOGGER, WlBufferedStream, WlDataControlOffer, WlOfferTracker, WlSessionManager,
-    log_debug, log_error,
+    Colors, LOGGER, WlBufferedStream, WlDataControlOffer, WlEvent, WlOfferTracker, WlSessionManager, log_debug, log_error,
 };
 
 fn main() -> ExitCode {
@@ -45,11 +40,14 @@ fn run() -> io::Result<()> {
     log_debug!("Starting Paste loop");
     mgr.sync()?;
 
-    let mut tracker = WlOfferTracker::new();
+    mgr.dispatch_messages(&mut |ev| {
+        match ev {
+            WlEvent::SyncDone => ControlFlow::Break(Ok(())),
+            _ => ControlFlow::Continue(()),
+        }
+    })?;
 
-    mgr.dispatch_messages(|wl_event| tracker.handle_event(&wl_event))?;
-
-    let Some(slot) = tracker.get_selected_slot() else {
+    let Some(slot) = mgr.get_selected_slot() else {
         return Err(io::Error::other("nothing found to paste"));
     };
     log_debug!(

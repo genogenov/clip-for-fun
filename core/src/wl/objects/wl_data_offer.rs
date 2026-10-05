@@ -1,7 +1,7 @@
 use std::os::fd::OwnedFd;
 
 use crate::{
-    unix_fd_stream::FdBuffer,
+    unix_fd_stream::InFdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
         wl_message_reader::WlMessageReader,
@@ -59,19 +59,18 @@ impl WlDataControlOffer {
 
     pub fn destroy(
         &self,
-        writer: WlMessageWriter,
-        router: &mut WlMessageRouter,
+        writer: WlMessageWriter
     ) -> Result<(), std::io::Error> {
         let msg = writer
             .begin_message::<WlDataControlOffer>(WlDataControlOfferOps::Destroy, self.local_id)?;
         msg.end();
-        router.free_server(self.local_id)
+        Ok(())
     }
 
     pub fn parse_message<'a>(
         opcode: u16,
         buffer: &'a [u8],
-        _fds: &mut FdBuffer,
+        _fds: &mut InFdBuffer,
     ) -> std::io::Result<DataControlOfferEvent<'a>> {
         let mut reader = WlMessageReader::new(buffer);
         match opcode {
@@ -86,5 +85,53 @@ impl WlDataControlOffer {
                 "Unknown opcode",
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{FdWriteAndClose, wl::wl_buffered_stream::WlBufferedStream};
+    use std::{io::Read, os::unix::net::UnixStream, time::Duration};
+
+    #[test]
+    fn receive_sends_the_mime_and_the_fd_and_destroy_has_no_arguments() {
+        let (a, b) = UnixStream::pair().unwrap();
+        let mut client = WlBufferedStream::new(a.into());
+        let mut compositor = WlBufferedStream::new(b.into());
+        let offer_id: u32 = 0xff00_0000;
+        let (mut payload_rx, payload_tx) = UnixStream::pair().unwrap();
+
+        let offer = WlDataControlOffer::new(offer_id);
+        offer
+            .receive(client.get_writer(), "text/plain", payload_tx.into())
+            .unwrap();
+        offer.destroy(client.get_writer()).unwrap();
+        client.write().unwrap();
+
+        let (header, body, fds) = compositor.read_next_message().unwrap().unwrap();
+        assert_eq!(
+            (header.object_id, header.opcode),
+            (offer_id, u16::from(WlDataControlOfferOps::Receive))
+        );
+        assert_eq!(WlMessageReader::new(body).str(), Some(&b"text/plain"[..]));
+        fds.pop_last_in_fd()
+            .unwrap()
+            .fd_write_and_close(b"hello")
+            .unwrap();
+
+        let (header, ..) = compositor.read_next_message().unwrap().unwrap();
+        assert_eq!(
+            (header.object_id, header.opcode, header.size),
+            (offer_id, u16::from(WlDataControlOfferOps::Destroy), 8)
+        );
+
+        // Times out instead of hanging if the client kept its copy of the write end.
+        payload_rx
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let mut got = Vec::new();
+        payload_rx.read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"hello");
     }
 }
