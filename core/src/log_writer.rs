@@ -17,13 +17,44 @@ pub struct Colors {
     pub reset: &'static str,
 }
 
+macro_rules! bold {
+    () => {
+        "\x1b[1m"
+    };
+}
+macro_rules! red {
+    () => {
+        "\x1b[31m"
+    };
+}
+macro_rules! green {
+    () => {
+        "\x1b[32m"
+    };
+}
+macro_rules! yellow {
+    () => {
+        "\x1b[33m"
+    };
+}
+macro_rules! cyan {
+    () => {
+        "\x1b[36m"
+    };
+}
+macro_rules! reset {
+    () => {
+        "\x1b[0m"
+    };
+}
+
 const ANSI: Colors = Colors {
-    bold: "\x1b[1m",
-    red: "\x1b[31m",
-    green: "\x1b[32m",
-    yellow: "\x1b[33m",
-    cyan: "\x1b[36m",
-    reset: "\x1b[0m",
+    bold: bold!(),
+    red: red!(),
+    green: green!(),
+    yellow: yellow!(),
+    cyan: cyan!(),
+    reset: reset!(),
 };
 
 const PLAIN: Colors = Colors {
@@ -49,9 +80,9 @@ impl LogWriter {
         let pick = |color: &'static str, plain: &'static str| if colored { color } else { plain };
         Self {
             colors: if colored { ANSI } else { PLAIN },
-            info_prefix: pick("\x1b[1;32minfo:\x1b[0m", "info:"),
-            error_prefix: pick("\x1b[1;31merror:\x1b[0m", "error:"),
-            debug_prefix: pick("\x1b[1;36mdebug:\x1b[0m", "debug:"),
+            info_prefix: pick(concat!(bold!(), green!(), "info:", reset!()), "info:"),
+            error_prefix: pick(concat!(bold!(), red!(), "error:", reset!()), "error:"),
+            debug_prefix: pick(concat!(bold!(), cyan!(), "debug:", reset!()), "debug:"),
         }
     }
 
