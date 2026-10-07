@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::io::Result;
+use std::str::FromStr;
 use std::{ffi::OsString, path::PathBuf};
 
 use clip_for_fun_core::{Colors, LOGGER, log_debug};
@@ -103,6 +104,18 @@ pub(crate) fn usage(program_cmd: &OsString) -> String {
         cyan = cyan,
         reset = reset,
     )
+}
+
+pub(crate) fn fallback_temp_dir() -> PathBuf {
+    std::env::var_os("TMPDIR")
+        .map(|v| {
+            if v.is_empty() {
+                PathBuf::from("/tmp")
+            } else {
+                PathBuf::from(v)
+            }
+        })
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 fn value(next: Option<OsString>, program: &OsString, option: impl Display) -> Result<OsString> {

@@ -37,10 +37,25 @@ struct cmsghdr {
     // followed by u8[] data
 }
 
-#[cfg(not(target_arch = "mips"))]
+#[cfg(not(any(
+    target_arch = "mips",
+    target_arch = "mips32r6",
+    target_arch = "mips64",
+    target_arch = "mips64r6",
+    target_arch = "sparc",
+    target_arch = "sparc64"
+)))]
+
 const SOL_SOCKET: i32 = 1;
 
-#[cfg(target_arch = "mips")]
+#[cfg(any(
+    target_arch = "mips",
+    target_arch = "mips32r6",
+    target_arch = "mips64",
+    target_arch = "mips64r6",
+    target_arch = "sparc",
+    target_arch = "sparc64"
+))]
 const SOL_SOCKET: i32 = 0xffff;
 
 const SCM_RIGHTS: i32 = 0x01;

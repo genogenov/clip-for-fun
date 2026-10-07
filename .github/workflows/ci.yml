@@ -25,3 +25,21 @@ jobs:
       - run: cargo clippy --release --all-targets -- -D warnings
       - run: cargo test
       - run: cargo build --release
+
+  cross-check:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target:
+          - i686-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - powerpc64le-unknown-linux-gnu
+          - s390x-unknown-linux-gnu
+          - riscv64gc-unknown-linux-gnu
+          - loongarch64-unknown-linux-gnu
+          - sparc64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install stable --profile minimal -c clippy -t ${{ matrix.target }} && rustup default stable
+      - run: cargo clippy --target ${{ matrix.target }} --all-targets -- -D warnings

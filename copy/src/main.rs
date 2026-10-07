@@ -1,10 +1,12 @@
 mod args;
+mod payload;
 use std::{
     env,
     ffi::OsString,
+    fs::File,
     io::{self, ErrorKind, Read, Write, stdin},
     ops::ControlFlow,
-    os::unix::ffi::OsStringExt,
+    os::{fd::AsFd, unix::ffi::OsStringExt},
     path::PathBuf,
     process::ExitCode,
 };
@@ -14,7 +16,10 @@ use clip_for_fun_core::{
     WlSessionManager, log_debug, log_error,
 };
 
-use crate::args::{Command, Input};
+use crate::{
+    args::{Command, Input},
+    payload::Payload,
+};
 
 fn main() -> ExitCode {
     match run() {
@@ -35,23 +40,33 @@ fn run() -> io::Result<()> {
         }
         Command::Copy(args) => args,
     };
-    if args.files || args.temp_dir.is_some() {
+    if args.files {
         return Err(io::Error::new(
             ErrorKind::Unsupported,
-            "--file and --temp-dir are not implemented yet",
+            "--file is not implemented yet",
         ));
     }
     let input = match args.input {
-        Input::Args(words) => words
-            .into_iter()
-            .map(OsString::into_vec)
-            .collect::<Vec<_>>()
-            .join(&b' '),
-        Input::Stdin => {
-            let mut input = Vec::new();
-            stdin().read_to_end(&mut input)?;
-            input
+        Input::Args(mut words) if words.len() == 1 => Payload::Bytes(words.remove(0).into_vec()),
+        Input::Args(words) => {
+            let total = words
+                .iter()
+                .map(|w| w.len() + 1)
+                .sum::<usize>()
+                .saturating_sub(1);
+            let mut words = words.into_iter();
+            let mut text = words.next().unwrap_or_default().into_vec();
+            text.reserve_exact(total - text.len());
+            for word in words {
+                text.push(b' ');
+                text.extend_from_slice(word.as_encoded_bytes());
+            }
+            Payload::Bytes(text)
         }
+        Input::Stdin => payload::store(
+            &mut File::from(stdin().as_fd().try_clone_to_owned()?),
+            &args.temp_dir.unwrap_or_else(args::fallback_temp_dir),
+        )?,
     };
 
     let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
@@ -70,8 +85,6 @@ fn run() -> io::Result<()> {
     log_debug!("Successfully connected to the Wayland socket");
 
     let mut mgr = WlSessionManager::initialize(stream)?;
-
-    log_debug!("Read {} bytes of input", input.len());
 
     let data_source = mgr.create_data_source()?;
     if let Some(mime) = args.mime {
@@ -98,8 +111,8 @@ fn run() -> io::Result<()> {
             log_debug!("Received send event with fd {:?}", fd);
 
             // Serve to pasting client via fd it sent.
-            if fd.fd_write_and_close(&input).is_err() {
-                log_error!("Failed to write to fd");
+            if let Err(e) = input.serve(fd) {
+                log_error!("Failed to write to fd: {}", e);
             }
             ControlFlow::Continue(())
         }
