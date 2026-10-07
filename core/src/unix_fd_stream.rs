@@ -45,7 +45,6 @@ struct cmsghdr {
     target_arch = "sparc",
     target_arch = "sparc64"
 )))]
-
 const SOL_SOCKET: i32 = 1;
 
 #[cfg(any(

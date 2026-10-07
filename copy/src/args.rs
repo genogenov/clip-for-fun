@@ -1,6 +1,5 @@
 use std::fmt::Display;
 use std::io::Result;
-use std::str::FromStr;
 use std::{ffi::OsString, path::PathBuf};
 
 use clip_for_fun_core::{Colors, LOGGER, log_debug};

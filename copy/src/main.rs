@@ -4,7 +4,7 @@ use std::{
     env,
     ffi::OsString,
     fs::File,
-    io::{self, ErrorKind, Read, Write, stdin},
+    io::{self, ErrorKind, Write, stdin},
     ops::ControlFlow,
     os::{fd::AsFd, unix::ffi::OsStringExt},
     path::PathBuf,
@@ -12,8 +12,8 @@ use std::{
 };
 
 use clip_for_fun_core::{
-    FdWriteAndClose, OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlDataControlSourceEvent, WlEvent,
-    WlSessionManager, log_debug, log_error,
+    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlDataControlSourceEvent, WlEvent, WlSessionManager,
+    log_debug, log_error,
 };
 
 use crate::{
@@ -47,7 +47,6 @@ fn run() -> io::Result<()> {
         ));
     }
     let input = match args.input {
-        Input::Args(mut words) if words.len() == 1 => Payload::Bytes(words.remove(0).into_vec()),
         Input::Args(words) => {
             let total = words
                 .iter()
