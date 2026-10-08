@@ -1,5 +1,6 @@
 mod args;
 mod payload;
+mod process_util;
 use std::{
     env,
     ffi::OsString,
@@ -102,6 +103,7 @@ fn run() -> io::Result<()> {
 
     mgr.sync()?;
 
+    let mut detached = args.foreground;
     mgr.dispatch_messages(&mut |wl_event| match wl_event {
         WlEvent::DataControlSource {
             id: _,
@@ -121,6 +123,28 @@ fn run() -> io::Result<()> {
         } => {
             log_debug!("Received cancelled event. Exiting...");
             ControlFlow::Break(Ok(()))
+        }
+        WlEvent::SyncDone if !detached => {
+            log_debug!("Received SyncDone - detaching from terminal");
+            detached = true;
+            match process_util::fork_process() {
+                Ok(process_util::Forked::Parent) => {
+                    log_debug!("Parent process exiting after fork");
+                    ControlFlow::Break(Ok(()))
+                }
+                Ok(process_util::Forked::Child) => {
+                    if let Err(e) = process_util::detach() {
+                        log_error!("Failed to detach child process: {}", e);
+                    } else {
+                        log_debug!("Successfully detached child process from terminal");
+                    }
+                    ControlFlow::Continue(())
+                }
+                Err(e) => ControlFlow::Break(Err(io::Error::new(
+                    e.kind(),
+                    format!("Failed to fork process: {e}"),
+                ))),
+            }
         }
         _ => ControlFlow::Continue(()),
     })

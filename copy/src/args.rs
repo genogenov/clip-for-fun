@@ -14,6 +14,7 @@ pub enum Input {
 pub struct CopyArgs {
     pub input: Input,
     pub files: bool,
+    pub foreground: bool,
     pub mime: Option<String>,
     pub primary: bool,
     pub temp_dir: Option<PathBuf>,
@@ -29,6 +30,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
     let mut out = CopyArgs {
         input: Input::Stdin,
         files: false,
+        foreground: false,
         mime: None,
         primary: false,
         temp_dir: None,
@@ -43,6 +45,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
             b"-h" | b"--help" => return Ok(Command::Help(usage(&program))),
             b"-p" | b"--primary" => out.primary = true,
             b"--file" => out.files = true,
+            b"--foreground" | b"-f" => out.foreground = true,
             b"-t" | b"--type" => {
                 out.mime = Some(parse_mime(args.next(), &program, &arg.display())?)
             }
@@ -94,6 +97,7 @@ pub(crate) fn usage(program_cmd: &OsString) -> String {
             "Options:\n",
             "    {bold}-t, --type {cyan}<mime>{reset}           offer the data as this MIME type\n",
             "    {bold}-p, --primary{reset}               set the primary selection instead of the clipboard\n",
+            "    {bold}-f, --foreground{reset}            keep serving in the foreground instead of forking\n",
             "    {bold}--file{reset}                      treat the input as file paths and copy the files\n",
             "    {bold}--temp-dir {cyan}<dir>{reset}            where input over 128 KiB is kept (default: $TMPDIR or /tmp)\n",
             "    {bold}-h, --help{reset}                  show this help\n",
@@ -199,7 +203,7 @@ mod tests {
     fn no_arguments_reads_stdin_with_defaults() {
         let parsed = copy_args(&[]);
         assert_eq!(parsed.input, Input::Stdin);
-        assert!(!parsed.files && !parsed.primary);
+        assert!(!parsed.files && !parsed.primary && !parsed.foreground);
         assert_eq!((parsed.mime, parsed.temp_dir), (None, None));
     }
 
@@ -210,9 +214,9 @@ mod tests {
 
     #[test]
     fn double_dash_ends_options() {
-        let parsed = copy_args(&["--", "-p", "--type", "x"]);
-        assert_eq!(parsed.input, words(&["-p", "--type", "x"]));
-        assert!(!parsed.primary);
+        let parsed = copy_args(&["--", "-p", "-f", "--type", "x"]);
+        assert_eq!(parsed.input, words(&["-p", "-f", "--type", "x"]));
+        assert!(!parsed.primary && !parsed.foreground);
         assert_eq!(parsed.mime, None);
 
         let parsed = copy_args(&["-p", "--", "--"]);
@@ -238,6 +242,9 @@ mod tests {
         for flag in ["-p", "--primary"] {
             assert!(copy_args(&[flag]).primary);
         }
+        for flag in ["-f", "--foreground"] {
+            assert!(copy_args(&[flag]).foreground);
+        }
         let parsed = copy_args(&["--file", "a.png"]);
         assert!(parsed.files);
         assert_eq!(parsed.input, words(&["a.png"]));
@@ -259,7 +266,7 @@ mod tests {
             let Ok(Command::Help(usage)) = parse(args) else {
                 panic!("{args:?} did not return help");
             };
-            assert!(usage.contains("Usage:"));
+            assert!(usage.contains("Usage:") && usage.contains("--foreground"));
         }
         assert_eq!(copy_args(&["--", "-h"]).input, words(&["-h"]));
     }
