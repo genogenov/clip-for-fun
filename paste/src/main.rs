@@ -1,16 +1,13 @@
+mod args;
 use std::{
-    env,
-    ffi::OsString,
-    io::{self, ErrorKind},
-    ops::ControlFlow,
-    path::PathBuf,
-    process::ExitCode,
+    env, ffi::OsString, io::{self, ErrorKind, IsTerminal, Write}, ops::ControlFlow, path::PathBuf, process::ExitCode,
 };
 
 use clip_for_fun_core::{
-    Colors, LOGGER, WlBufferedStream, WlDataControlOffer, WlEvent, WlSessionManager, log_debug,
-    log_error,
+    KNOWN_MIME_TYPES, OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlDataControlOffer, WlEvent, WlOffer, WlSessionManager, log_debug, log_error,
 };
+
+use crate::args::{Command, PasteArgs};
 
 fn main() -> ExitCode {
     match run() {
@@ -23,8 +20,18 @@ fn main() -> ExitCode {
 }
 
 fn run() -> io::Result<()> {
-    let args: Vec<OsString> = env::args_os().collect();
-    parse_args(&args)?;
+    let input_args = env::args_os();
+    let args = match args::parse_args(input_args)? {
+        Command::Help(usage) => {
+            let _ = io::stdout().write_all(usage.as_bytes());
+            return Ok(());
+        }
+        Command::ListTypes => {
+            // Handle listing types here if needed
+            return Ok(());
+        }
+        Command::Paste(args) => args,
+    };
 
     let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
@@ -51,78 +58,53 @@ fn run() -> io::Result<()> {
         _ => ControlFlow::Continue(()),
     })?;
 
-    let Some(slot) = mgr.get_selected_slot() else {
+    write_all_to_stdout(&args, &mut mgr)
+}
+
+fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Result<()> {
+    let Some(offer) = get_offer(args, mgr) else {
         return Err(io::Error::other("nothing found to paste"));
     };
     log_debug!(
         "Selected offer: id = {}, mime = {:?}",
-        slot.id(),
-        slot.preferred_mime()
+        offer.id(),
+        offer.preferred_mime()
     );
 
-    let Some(preferred_mime) = slot.preferred_mime() else {
+    let Some(preferred_mime) = offer.preferred_mime() else {
         return Err(io::Error::other("clipboard has no text content."));
     };
 
     let (mut reader, writer) = io::pipe()?;
-    WlDataControlOffer::new(slot.id()).receive(
+    WlDataControlOffer::new(offer.id()).receive(
         mgr.get_message_writer(),
         preferred_mime,
         writer.into(),
     )?;
     mgr.send_messages()?;
 
-    match io::copy(&mut reader, &mut io::stdout().lock()) {
+    let stdout = io::stdout();
+    let mut out_guard = stdout.lock();
+    _ = match io::copy(&mut reader, &mut out_guard) {
         Err(e) if e.kind() == ErrorKind::BrokenPipe => Ok(()),
         other => other.map(drop),
+    }?;
+
+    if args.newline && is_text_mime(preferred_mime) {
+        writeln!(out_guard)?;
+    }
+
+    Ok(())
+}
+
+fn get_offer<'a>(args: &'a PasteArgs, mgr: &'a WlSessionManager) -> Option<&'a WlOffer> {
+    if args.primary {
+        mgr.get_primary_offer()
+    } else {
+        mgr.get_offer()
     }
 }
 
-fn parse_args(args: &[OsString]) -> io::Result<()> {
-    // This method is just a placeholder for future argument parsing logic.
-    if args.len() <= 1 {
-        return Ok(());
-    }
-    let Colors {
-        bold,
-        yellow,
-        green,
-        reset,
-        ..
-    } = LOGGER.colors;
-    Err(io::Error::new(
-        ErrorKind::InvalidInput,
-        format!(
-            "unexpected argument '{}'\n\
-             \n\
-             {bold}{yellow}Usage:{reset}\n  {green}{}{reset}",
-            args[1].display(),
-            args[0].display()
-        ),
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
-
-    fn args(list: &[&[u8]]) -> Vec<OsString> {
-        list.iter()
-            .map(|a| OsStr::from_bytes(a).to_os_string())
-            .collect()
-    }
-
-    #[test]
-    fn no_arguments_is_accepted() {
-        assert!(parse_args(&args(&[b"paste"])).is_ok());
-    }
-
-    #[test]
-    fn any_argument_is_an_error() {
-        for list in [&[&b"paste"[..], b"--paste"][..], &[b"paste", b"a", b"b"]] {
-            let result = parse_args(&args(list));
-            assert!(matches!(result, Err(e) if e.kind() == ErrorKind::InvalidInput));
-        }
-    }
+fn is_text_mime(mime: &str) -> bool {
+    mime.starts_with("text/") || OFFERED_TXT_MIME_TYPES.contains(&mime)
 }

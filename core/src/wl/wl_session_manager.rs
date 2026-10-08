@@ -333,8 +333,12 @@ impl WlSessionManager {
         self.stream.write()
     }
 
-    pub fn get_selected_slot(&self) -> Option<&WlOffer> {
+    pub fn get_offer(&self) -> Option<&WlOffer> {
         self.offer_tracker.get_selected_slot()
+    }
+
+    pub fn get_primary_offer(&self) -> Option<&WlOffer> {
+        self.offer_tracker.get_primary_selected_slot()
     }
 }
 
@@ -639,12 +643,12 @@ mod tests {
                 (primary, b"text/plain".to_vec()),
             ]
         );
-        let selected = session.get_selected_slot().unwrap();
+        let selected = session.get_offer().unwrap();
         assert_eq!(
             (selected.id(), selected.preferred_mime()),
             (clipboard, Some("text/plain;charset=utf-8"))
         );
-        let selected = session.offer_tracker.get_primary_selected_slot().unwrap();
+        let selected = session.get_primary_offer().unwrap();
         assert_eq!(
             (selected.id(), selected.preferred_mime()),
             (primary, Some("text/plain"))
@@ -661,7 +665,7 @@ mod tests {
         send_then_eof(&mut compositor, &events);
 
         dispatch_to_eof(&mut session);
-        assert!(session.get_selected_slot().is_none());
+        assert!(session.get_offer().is_none());
         assert_eq!(destroyed_offers(session, compositor), [offer]);
     }
 
