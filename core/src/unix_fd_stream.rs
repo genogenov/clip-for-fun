@@ -66,8 +66,11 @@ const CMSG_FD_OFFSET: usize = cmsg_align(std::mem::size_of::<cmsghdr>());
 
 const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<RawFd>());
 
-#[repr(C, align(8))]
-struct AlignedCmsghdr([u8; CTRL_BUFFER_SIZE]);
+#[repr(C)]
+struct AlignedCmsghdr {
+    _align: [cmsghdr; 0], // force cmsghdr alignment
+    buff: [u8; CTRL_BUFFER_SIZE],
+}
 
 const fn cmsg_align(len: usize) -> usize {
     let align_to = std::mem::size_of::<usize>();
@@ -208,15 +211,18 @@ impl UnixFdStream {
         };
 
         loop {
-            let mut ctrl_buffer = AlignedCmsghdr([0u8; CTRL_BUFFER_SIZE]);
+            let mut ctrl_buffer = AlignedCmsghdr {
+                _align: [],
+                buff: [0u8; CTRL_BUFFER_SIZE],
+            };
 
             let mut msg = msghdr {
                 msg_name: ptr::null_mut(),
                 msg_namelen: 0,
                 msg_iov: &mut iovec,
                 msg_iovlen: 1,
-                msg_control: ctrl_buffer.0.as_mut_ptr() as *mut std::ffi::c_void,
-                msg_controllen: ctrl_buffer.0.len(),
+                msg_control: ctrl_buffer.buff.as_mut_ptr() as *mut std::ffi::c_void,
+                msg_controllen: ctrl_buffer.buff.len(),
                 msg_flags: 0,
             };
 
@@ -239,7 +245,7 @@ impl UnixFdStream {
             if msg.msg_flags & MSG_CTRUNC != 0 {
                 return Err(std::io::Error::other("Control message truncated"));
             }
-            let mut ctrl = &ctrl_buffer.0[..msg.msg_controllen];
+            let mut ctrl = &ctrl_buffer.buff[..msg.msg_controllen];
             while let Some(hdr) = ctrl.first_chunk::<CMSG_FD_OFFSET>() {
                 let len = usize::from_ne_bytes(hdr[..USIZE].try_into().unwrap());
                 let level = i32::from_ne_bytes(hdr[USIZE..USIZE + 4].try_into().unwrap());
@@ -276,8 +282,11 @@ impl UnixFdStream {
         } else {
             let fds_bytes_len: usize = fds.len() * std::mem::size_of::<RawFd>();
             let cmsg_space = cmsg_space(fds_bytes_len);
-            let mut ctrl_buffer: AlignedCmsghdr = AlignedCmsghdr([0u8; CTRL_BUFFER_SIZE]);
-            let mut_ctrl_buffer = &mut ctrl_buffer.0;
+            let mut ctrl_buffer: AlignedCmsghdr = AlignedCmsghdr {
+                _align: [],
+                buff: [0u8; CTRL_BUFFER_SIZE],
+            };
+            let mut_ctrl_buffer = &mut ctrl_buffer.buff;
             mut_ctrl_buffer[..USIZE]
                 .copy_from_slice(&(CMSG_FD_OFFSET + fds_bytes_len).to_ne_bytes());
             mut_ctrl_buffer[USIZE..USIZE + 4].copy_from_slice(&SOL_SOCKET.to_ne_bytes());

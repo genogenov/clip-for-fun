@@ -18,10 +18,6 @@ pub trait WlGlobal: WlObject {
 
 pub enum NoEvents {}
 
-wl_enum! {
-    pub enum NoOps {_NoOp = 0 }
-}
-
 #[derive(Debug)]
 pub struct MessageHeader {
     pub object_id: u32,
