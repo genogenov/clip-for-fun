@@ -86,9 +86,9 @@ For debug output, build without `--release`, run the binaries from `./target/deb
 
 - **Zero dependencies** for the core library, `copy` and `paste`: no libc crate, no libwayland. Only the `history` daemon will use crates (SQLite, image decoding, hashing).
 - **Hand-written Wayland wire protocol** over the Unix socket: message framing, object id routing, and file descriptor passing (`SCM_RIGHTS`) through hand-written `sendmsg`/`recvmsg` bindings.
-- **Minimal `unsafe`**: limited to a small FFI module (`sendmsg`, `recvmsg`, `fork`, `fcntl`, ...), each call with a `SAFETY` comment. Architecture-specific constants are checked against the kernel headers.
+- **Minimal `unsafe`**: limited to a small FFI module (`sendmsg`, `recvmsg`, `splice`, `fork`, `fcntl`, ...), each call with a `SAFETY` comment. Architecture-specific constants are checked against the kernel headers.
 - **No helper processes**: `copy` and `paste` read, serve and receive the data themselves without starting other programs, which keeps small copies and pastes fast.
-- **Zero-copy where the kernel allows it**: pastes are streamed with `splice` through an enlarged pipe.
+- **Zero-copy where the kernel allows it**: `copy` serves input over 128 KiB from its temp file with `splice`, and `paste` streams to stdout with `splice`, so large transfers never pass through user space. The pipes in between are enlarged from 64 KiB to 1 MiB so each `splice` moves more at once.
 - **Bounded memory**: input over 128 KiB goes to an unnamed temp file (`O_TMPFILE`, or create + immediate unlink), so a 100 MiB copy uses ~2.3 MB of RAM and nothing is left on disk even if the process is killed.
 - **A well-behaved background process**: `copy` forks only after the compositor confirms the selection, so `copy x && paste` always sees `x`. The child gets its own session, `/` as its working directory and `/dev/null` as stdio, so it survives its terminal closing and never blocks `$(copy x)` or pipes.
 - **Other apps are untrusted**: MIME type names with control characters (terminal escape sequences) or invalid UTF-8 are skipped, offers are capped, and a malformed offer never stops `copy` or `paste`.

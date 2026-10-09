@@ -21,9 +21,23 @@ unsafe extern "C" {
 
     // Performs operations on a file descriptor. Link to doc: https://man7.org/linux/man-pages/man2/fcntl.2.html
     pub fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+
+    // Moves data between two file descriptors without copying between kernel and user space. Link to doc: https://man7.org/linux/man-pages/man2/splice.2.html
+    pub fn splice(
+        fd_in: RawFd,
+        off_in: *mut i64,
+        fd_out: RawFd,
+        off_out: *mut i64,
+        len: usize,
+        flags: u32,
+    ) -> isize;
 }
 
+pub const F_GETPIPE_SZ: i32 = 1032;
+
 pub const F_SETPIPE_SZ: i32 = 1031;
+
+pub const F_SETFL: i32 = 4;
 
 pub const SCM_RIGHTS: i32 = 0x01;
 

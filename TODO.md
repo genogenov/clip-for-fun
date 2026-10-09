@@ -1,6 +1,5 @@
 # Todo
 
-- `copy`: zero-copy serving of large copies with `splice` (today large copies go through an 8 KiB read/write loop)
 - Integration tests: the real binaries against a headless compositor, in CI
 - `history`
   - Daemon that watches the clipboard and saves every copy to disk, all of its MIME types, without blocking the Wayland connection
