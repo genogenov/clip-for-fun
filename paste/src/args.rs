@@ -1,12 +1,12 @@
 use std::fmt::Display;
 use std::io::Result;
-use std::{ffi::OsString, path::PathBuf};
+use std::ffi::OsString;
 
 use clip_for_fun_core::{Colors, LOGGER, log_debug};
 
 #[derive(Debug)]
 pub struct PasteArgs {
-    pub newline: bool,
+    pub no_newline: bool,
     pub mime: Option<String>,
     pub primary: bool,
     pub list_types: bool,
@@ -14,14 +14,14 @@ pub struct PasteArgs {
 pub enum Command {
     Help(String),
     Paste(PasteArgs),
-    ListTypes,
+    ListTypes { primary: bool },
 }
 
 pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
     let mut args = args.into_iter();
     let program = args.next().unwrap_or_default();
     let mut out = PasteArgs {
-        newline: false,
+        no_newline: false,
         mime: None,
         primary: false,
         list_types: false,
@@ -32,9 +32,8 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
             b"-p" | b"--primary" => out.primary = true,
             b"-l" | b"--list-types" => {
                 out.list_types = true;
-                break;
-            },
-            b"-n" | b"--newline" => out.newline = true,
+            }
+            b"-n" | b"--no-newline" => out.no_newline = true,
             b"-t" | b"--type" => {
                 out.mime = Some(parse_mime(args.next(), &program, &arg.display())?)
             }
@@ -49,8 +48,10 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
 
     log_debug!("Args parsed: {:?}", out);
 
-    if out.list_types{
-        return Ok(Command::ListTypes);
+    if out.list_types {
+        return Ok(Command::ListTypes {
+            primary: out.primary,
+        });
     }
 
     Ok(Command::Paste(out))
@@ -75,7 +76,7 @@ pub(crate) fn usage(program_cmd: &OsString) -> String {
             "Options:\n",
             "    {bold}-t, --type {cyan}<mime>{reset}           paste as this MIME type if its offered.\n",
             "    {bold}-p, --primary{reset}               paste from the primary selection instead of the clipboard\n",
-            "    {bold}-n, --newline{reset}                append a newline to the pasted content if its text\n",
+            "    {bold}-n, --no-newline{reset}                do not append a newline to the pasted content if its text and pasting to terminal\n",
             "    {bold}-l, --list-types{reset}            list available MIME types\n",
             "    {bold}-h, --help{reset}                  show this help\n",
         ),
@@ -84,18 +85,6 @@ pub(crate) fn usage(program_cmd: &OsString) -> String {
         cyan = cyan,
         reset = reset,
     )
-}
-
-pub(crate) fn fallback_temp_dir() -> PathBuf {
-    std::env::var_os("TMPDIR")
-        .map(|v| {
-            if v.is_empty() {
-                PathBuf::from("/tmp")
-            } else {
-                PathBuf::from(v)
-            }
-        })
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 fn value(next: Option<OsString>, program: &OsString, option: impl Display) -> Result<OsString> {

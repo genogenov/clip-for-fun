@@ -10,7 +10,7 @@ pub use wl::{
         wl_data_control_device::{DataControlDeviceEvent, WlDataControlDevice},
         wl_data_managers::DataDeviceManagerExt,
         wl_data_managers::ExtDataControlManagerV1,
-        wl_data_offer::{DataControlOfferEvent, WlDataControlOffer},
+        wl_data_offer::{DataControlOfferEvent, OFFERED_TXT_MIME_TYPES, WlDataControlOffer},
         wl_data_source::WlDataControlSourceEvent,
         wl_display::WlDisplay,
         wl_registry::{BoundInterface, WlSeat},
@@ -18,7 +18,7 @@ pub use wl::{
     wl_buffered_stream::WlBufferedStream,
     wl_message_reader::WlMessageReader,
     wl_message_router::{WlEvent, WlMessageRouter},
-    wl_offer_tracker::{KNOWN_MIME_TYPES, OFFERED_TXT_MIME_TYPES, WlOffer, WlOfferTracker},
+    wl_offer_tracker::WlOfferTracker,
     wl_session_manager::WlSessionManager,
 };
 
