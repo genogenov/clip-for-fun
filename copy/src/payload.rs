@@ -284,7 +284,7 @@ fn random_suffix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{env, os::fd::AsRawFd, thread, time::Duration};
+    use std::{env, os::fd::AsRawFd, thread};
 
     fn data(len: usize) -> Vec<u8> {
         (0..len).map(|i| (i % 251) as u8).collect()
@@ -498,7 +498,7 @@ mod tests {
             assert_eq!(unsafe { fcntl(writer.as_raw_fd(), F_SETFL, O_NONBLOCK) }, 0);
             let reading = thread::spawn(move || {
                 // Let the pipe fill up first, so a non-blocking write would hit EAGAIN.
-                thread::sleep(Duration::from_millis(50));
+                thread::sleep(std::time::Duration::from_millis(50));
                 let mut out = Vec::new();
                 reader.read_to_end(&mut out).unwrap();
                 out
