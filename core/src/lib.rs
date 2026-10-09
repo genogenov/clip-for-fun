@@ -1,5 +1,6 @@
 #![warn(clippy::undocumented_unsafe_blocks)]
 
+pub mod ffi;
 #[doc(hidden)]
 mod log_writer;
 mod mime;

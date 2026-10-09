@@ -9,12 +9,15 @@ use std::{
         IsTerminal, Write,
     },
     ops::ControlFlow,
+    os::fd::{AsRawFd, OwnedFd},
     path::PathBuf,
     process::ExitCode,
 };
 
 use clip_for_fun_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlEvent, WlSessionManager, log_debug, log_error,
+    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlEvent, WlSessionManager,
+    ffi::{F_SETPIPE_SZ, fcntl},
+    log_debug, log_error,
 };
 
 use crate::args::{Command, PasteArgs};
@@ -83,6 +86,11 @@ fn write_offered_types_to_stdout(mimes: &[Cow<'static, str>]) -> io::Result<()> 
 
     if !mimes.is_empty() {
         writeln!(out_guard, "{}", mimes.join("\n"))?;
+    } else {
+        return Err(io::Error::new(
+            ErrorKind::NotFound,
+            "No offered MIME types available",
+        ));
     }
 
     Ok(())
@@ -103,7 +111,12 @@ fn get_offered_types(mgr: &mut WlSessionManager, primary: bool) -> &[Cow<'static
 fn write_all_to_stdout(args: &PasteArgs, mgr: &mut WlSessionManager) -> io::Result<()> {
     let (mut reader, writer) = io::pipe()?;
     let asked_mime = &args.mime;
-    let Some(preferred_mime) = mgr.receive_offer(args.primary, asked_mime, writer.into())? else {
+    let fd = OwnedFd::from(writer);
+
+    // SAFETY: fd is an open pipe we own and F_SETPIPE_SZ is a valid fcntl command for setting the pipe size, which takes one arg.
+    // If this fails we are OK to ignore and proceed.
+    unsafe { fcntl(fd.as_raw_fd(), F_SETPIPE_SZ, 1 << 20) };
+    let Some(preferred_mime) = mgr.receive_offer(args.primary, asked_mime, fd)? else {
         return Err(io::Error::new(
             InvalidInput,
             format!(

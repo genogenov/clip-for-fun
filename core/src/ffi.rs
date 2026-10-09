@@ -1,0 +1,94 @@
+use std::os::fd::RawFd;
+
+unsafe extern "C" {
+    // Forks the current process, returning -1 on error, 0 in the child, and the child's PID in the parent. Link to doc: https://man7.org/linux/man-pages/man2/fork.2.html
+    pub fn fork() -> i32;
+
+    // Creates a new session and sets the process group ID. Link to doc: https://man7.org/linux/man-pages/man2/setsid.2.html
+    pub fn setsid() -> i32;
+
+    // Duplicates a file descriptor to a given new file descriptor number. Link to doc: https://man7.org/linux/man-pages/man2/dup2.2.html
+    pub fn dup2(old: i32, new: i32) -> i32;
+
+    // Sets a signal handler for the given signal number. Link to doc: https://man7.org/linux/man-pages/man2/signal.2.html
+    pub fn signal(signum: i32, handler: usize) -> usize;
+
+    // Receives a message from a socket, potentially including ancillary data (control messages). Link to doc: https://man7.org/linux/man-pages/man2/recvmsg.2.html
+    pub fn recvmsg(sockfd: RawFd, msg: *mut msghdr, flags: i32) -> isize;
+
+    // Sends a message on a socket, potentially including ancillary data (control messages). Link to doc: https://man7.org/linux/man-pages/man2/sendmsg.2.html
+    pub fn sendmsg(sockfd: RawFd, msg: *const msghdr, flags: i32) -> isize;
+
+    // Performs operations on a file descriptor. Link to doc: https://man7.org/linux/man-pages/man2/fcntl.2.html
+    pub fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+}
+
+pub const F_SETPIPE_SZ: i32 = 1031;
+
+pub const SCM_RIGHTS: i32 = 0x01;
+
+pub const MSG_CTRUNC: i32 = 0x8;
+
+pub const MSG_CMSG_CLOEXEC: i32 = 0x40000000;
+
+pub const CMSG_FD_OFFSET: usize = cmsg_align(std::mem::size_of::<cmsghdr>());
+
+pub const SIGHUP: i32 = 1; // same on every Linux arch
+
+pub const SIG_IGN: usize = 1;
+
+pub const SIG_ERR: usize = usize::MAX;
+
+#[cfg(not(any(
+    target_arch = "mips",
+    target_arch = "mips32r6",
+    target_arch = "mips64",
+    target_arch = "mips64r6",
+    target_arch = "sparc",
+    target_arch = "sparc64"
+)))]
+pub const SOL_SOCKET: i32 = 1;
+
+#[cfg(any(
+    target_arch = "mips",
+    target_arch = "mips32r6",
+    target_arch = "mips64",
+    target_arch = "mips64r6",
+    target_arch = "sparc",
+    target_arch = "sparc64"
+))]
+pub const SOL_SOCKET: i32 = 0xffff;
+
+#[repr(C)]
+pub struct iovec {
+    pub iov_base: *mut u8,
+    pub iov_len: usize,
+}
+
+#[repr(C)]
+pub struct msghdr {
+    pub msg_name: *mut std::ffi::c_void,
+    pub msg_namelen: u32,
+    pub msg_iov: *mut iovec,
+    pub msg_iovlen: usize,
+    pub msg_control: *mut std::ffi::c_void,
+    pub msg_controllen: usize,
+    pub msg_flags: i32,
+}
+
+#[repr(C)]
+pub struct cmsghdr {
+    pub cmsg_len: usize,
+    pub cmsg_level: i32,
+    pub cmsg_type: i32,
+    // followed by u8[] data
+}
+
+pub const fn cmsg_align(len: usize) -> usize {
+    let align_to = std::mem::size_of::<usize>();
+    (len + align_to - 1) & !(align_to - 1)
+}
+
+pub const fn cmsg_space(len: usize) -> usize {
+    cmsg_align(std::mem::size_of::<cmsghdr>()) + cmsg_align(len)
+}

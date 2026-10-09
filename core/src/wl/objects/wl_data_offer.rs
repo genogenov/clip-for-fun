@@ -46,7 +46,7 @@ pub const KNOWN_MIME_TYPES: [&str; 6] = [
     TEXT,
     TEXT_HTML,
 ];
-pub const MAX_OFFERED_MIME_TYPES: usize = 32;
+pub const MAX_OFFERED_MIME_TYPES: usize = 128;
 pub const OFFERED_TXT_MIME_TYPES: [&str; 5] =
     [TEXT_PLAIN_UTF8, UTF8_STRING, TEXT_PLAIN, STRING, TEXT];
 

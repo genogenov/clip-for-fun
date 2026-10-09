@@ -1,22 +1,6 @@
 use std::{env, fs, io, os::fd::AsRawFd};
 
-unsafe extern "C" {
-    // Forks the current process, returning -1 on error, 0 in the child, and the child's PID in the parent. Link to doc: https://man7.org/linux/man-pages/man2/fork.2.html
-    fn fork() -> i32;
-
-    // Creates a new session and sets the process group ID. Link to doc: https://man7.org/linux/man-pages/man2/setsid.2.html
-    fn setsid() -> i32;
-
-    // Duplicates a file descriptor to a given new file descriptor number. Link to doc: https://man7.org/linux/man-pages/man2/dup2.2.html
-    fn dup2(old: i32, new: i32) -> i32;
-
-    // Sets a signal handler for the given signal number. Link to doc: https://man7.org/linux/man-pages/man2/signal.2.html
-    fn signal(signum: i32, handler: usize) -> usize;
-}
-
-const SIGHUP: i32 = 1; // same on every Linux arch
-const SIG_IGN: usize = 1;
-const SIG_ERR: usize = usize::MAX;
+use clip_for_fun_core::ffi::{SIG_ERR, SIG_IGN, SIGHUP, dup2, fork, setsid, signal};
 
 pub enum Forked {
     Parent,

@@ -9,84 +9,20 @@ use std::{
     ptr,
 };
 
+use crate::ffi::{
+    CMSG_FD_OFFSET, MSG_CMSG_CLOEXEC, MSG_CTRUNC, SCM_RIGHTS, SOL_SOCKET, cmsg_align, cmsg_space,
+    cmsghdr, iovec, msghdr, recvmsg, sendmsg,
+};
+
 const FD_BUFFER_LEN: usize = 32;
 const USIZE: usize = size_of::<usize>();
 
-#[repr(C)]
-struct iovec {
-    iov_base: *mut u8,
-    iov_len: usize,
-}
-
-#[repr(C)]
-struct msghdr {
-    msg_name: *mut std::ffi::c_void,
-    msg_namelen: u32,
-    msg_iov: *mut iovec,
-    msg_iovlen: usize,
-    msg_control: *mut std::ffi::c_void,
-    msg_controllen: usize,
-    msg_flags: i32,
-}
-
-#[repr(C)]
-struct cmsghdr {
-    cmsg_len: usize,
-    cmsg_level: i32,
-    cmsg_type: i32,
-    // followed by u8[] data
-}
-
-#[cfg(not(any(
-    target_arch = "mips",
-    target_arch = "mips32r6",
-    target_arch = "mips64",
-    target_arch = "mips64r6",
-    target_arch = "sparc",
-    target_arch = "sparc64"
-)))]
-const SOL_SOCKET: i32 = 1;
-
-#[cfg(any(
-    target_arch = "mips",
-    target_arch = "mips32r6",
-    target_arch = "mips64",
-    target_arch = "mips64r6",
-    target_arch = "sparc",
-    target_arch = "sparc64"
-))]
-const SOL_SOCKET: i32 = 0xffff;
-
-const SCM_RIGHTS: i32 = 0x01;
-
-const MSG_CTRUNC: i32 = 0x8;
-const MSG_CMSG_CLOEXEC: i32 = 0x40000000;
-
-const CMSG_FD_OFFSET: usize = cmsg_align(std::mem::size_of::<cmsghdr>());
-
-const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<RawFd>());
+pub const CTRL_BUFFER_SIZE: usize = cmsg_space(FD_BUFFER_LEN * std::mem::size_of::<RawFd>());
 
 #[repr(C)]
 struct AlignedCmsghdr {
     _align: [cmsghdr; 0], // force cmsghdr alignment
     buff: [u8; CTRL_BUFFER_SIZE],
-}
-
-const fn cmsg_align(len: usize) -> usize {
-    let align_to = std::mem::size_of::<usize>();
-    (len + align_to - 1) & !(align_to - 1)
-}
-
-const fn cmsg_space(len: usize) -> usize {
-    cmsg_align(std::mem::size_of::<cmsghdr>()) + cmsg_align(len)
-}
-
-unsafe extern "C" {
-    fn recvmsg(sockfd: RawFd, msg: *mut msghdr, flags: i32) -> isize;
-    fn sendmsg(sockfd: RawFd, msg: *const msghdr, flags: i32) -> isize;
-    // fn pipe2(fd: *mut RawFd, flags: i32) -> RawFd;
-    // fn close(fd: RawFd) -> i32;
-    // fn write(fd: RawFd, buf: *const u8, count: usize) -> isize;
 }
 
 pub struct InFdBuffer {

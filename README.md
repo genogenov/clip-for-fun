@@ -1,20 +1,36 @@
 # Clip-For-Fun - a Wayland Clipboard Manager (WIP)
 
-A pure Rust Wayland clipboard toolkit: `copy`, `paste`, and a planned `history` daemon.\
+A Wayland clipboard toolkit: `copy`, `paste`, and a planned `history` daemon.\
 Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
 
-The core library, `copy` and `paste` have zero dependencies - no libc crate or Wayland libraries. They talk the Wayland wire protocol directly over the Unix socket, with custom bindings for `sendmsg`/`recvmsg`. Only the `history` daemon will use crates (SQLite, image decoding, hashing).
+## What clip-for-fun is
 
-## What works
+Command-line tools for the Wayland clipboard, built for terminals, scripts and keybindings. Options and examples are under [Usage](#usage).
 
-- `clip-for-fun-copy`: copy arguments (joined with spaces) or stdin - Ctrl+V in other apps works, including X11 apps under Xwayland (`UTF8_STRING`, `STRING`, `TEXT`)
-  - `-t`/`--type <mime>` offers the data as a specific MIME type, `-p`/`--primary` sets the primary (middle-click) selection
-  - stdin up to 128 KiB stays in memory; larger input goes to an unnamed temp file (`O_TMPFILE`, falling back to create + immediate unlink) in `--temp-dir`, `$TMPDIR` or `/tmp`, so memory stays flat (a 100 MiB copy uses ~2.3 MB RSS) and nothing is left behind if the process is killed
-  - returns as soon as the compositor confirms the selection (~2 ms), so `copy x && paste` always sees `x`; a background process keeps serving until something else takes ownership of the compositor selection. It runs in its own session from `/` with stdio on `/dev/null`, so it survives its terminal closing and never blocks `$(copy x)` or pipes. `-f`/`--foreground` stays in the foreground instead
-- `clip-for-fun-paste`: paste to stdout, picking the best text MIME type the clipboard owner offers, streamed zero-copy with `splice` (via `std::io::copy`) when stdout is a file or pipe
-- Wayland wire format (headers, ints, strings, new_id)
-- Registry + binding `wl_seat` and `ext_data_control_manager_v1` at the lower of the server's and the implemented version
-- Sending and receiving fds over the socket (`SCM_RIGHTS`)
+- **`clip-for-fun-copy`** puts text or any data on the clipboard or the primary (middle-click) selection. It returns immediately while a background process keeps the data available, so other apps - Wayland and X11 alike - can paste it until something else is copied. Large inputs don't fill up memory.
+- **`clip-for-fun-paste`** writes the clipboard or primary selection to stdout. It picks the best text type by default, can paste any specific type, and lists what is on offer.
+- **`clip-for-fun-history`** (planned) will remember every copy, keep the clipboard alive after the source app exits, and let you search and restore older entries, with a UI/TUI to browse them.
+
+## Why
+
+A clipboard setup on Wayland today is assembled from separate projects: wl-clipboard for copy and paste, a history manager such as clipse or cliphist glued on with `wl-paste --watch` (which starts a new process for every copy), and often another tool for picking entries. Each has its own storage, its own quirks and its own idea of which types to keep.
+
+clip-for-fun aims to be one modern package for everything clipboard on current Wayland compositors - copy, paste, history and a UI/TUI - built on a single fast, dependency-free core and designed and tested together.
+
+## Technical principles
+
+- **Zero dependencies** for the core library, `copy` and `paste`: no libc crate, no libwayland. Only the `history` daemon will use crates (SQLite, image decoding, hashing).
+- **Hand-written Wayland wire protocol** over the Unix socket: message framing, object id routing, and file descriptor passing (`SCM_RIGHTS`) through hand-written `sendmsg`/`recvmsg` bindings.
+- **Minimal `unsafe`**: limited to a small FFI module (`sendmsg`, `recvmsg`, `fork`, `fcntl`, ...), each call with a `SAFETY` comment. Architecture-specific constants are checked against the kernel headers.
+- **No helper processes**: `copy` and `paste` read, serve and receive the data themselves without starting other programs, which keeps small copies and pastes fast.
+- **Zero-copy where the kernel allows it**: pastes are streamed with `splice` through an enlarged pipe.
+- **Bounded memory**: input over 128 KiB goes to an unnamed temp file (`O_TMPFILE`, or create + immediate unlink), so a 100 MiB copy uses ~2.3 MB of RAM and nothing is left on disk even if the process is killed.
+- **A well-behaved background process**: `copy` forks only after the compositor confirms the selection, so `copy x && paste` always sees `x`. The child gets its own session, `/` as its working directory and `/dev/null` as stdio, so it survives its terminal closing and never blocks `$(copy x)` or pipes.
+- **Other apps are untrusted**: MIME type names with control characters (terminal escape sequences) or invalid UTF-8 are skipped, offers are capped, and a malformed offer never stops `copy` or `paste`.
+
+## Benchmarks
+
+Coming soon.
 
 ## Platforms
 
@@ -22,11 +38,35 @@ Linux only. CI builds and tests on x86_64 and aarch64, and type-checks i686, arm
 
 ## Usage
 
-Needs a compositor that supports `ext_data_control_manager_v1` (developed and tested on Hyprland).
+Needs a compositor that supports `ext_data_control_manager_v1` (developed and tested on Hyprland). Build with `cargo build --release`; the binaries end up in `./target/release/`.
+
+### `clip-for-fun-copy [options] [<text>...]`
+
+| Option | Meaning |
+| --- | --- |
+| `<text>...` | Copy the arguments, joined with spaces. Without arguments, stdin is copied. |
+| `-t`, `--type <mime>` | Offer the data under this MIME type (default: the usual text types). |
+| `-p`, `--primary` | Set the primary (middle-click) selection instead of the clipboard. |
+| `-f`, `--foreground` | Keep serving in the foreground instead of returning right away. |
+| `--temp-dir <dir>` | Where stdin over 128 KiB is kept (default: `$TMPDIR`, then `/tmp`). |
+| `--` | Treat everything after it as text, even if it looks like an option. |
+| `-h`, `--help` | Show help. |
+
+### `clip-for-fun-paste [options]`
+
+| Option | Meaning |
+| --- | --- |
+| `-t`, `--type <mime>` | Paste exactly this MIME type. If it isn't offered, the error lists what is. |
+| `-p`, `--primary` | Paste the primary selection instead of the clipboard. |
+| `-l`, `--list-types` | List the offered MIME types instead of pasting. |
+| `-n`, `--no-newline` | Never add a trailing newline. By default one is added only when printing text to a terminal. |
+| `-h`, `--help` | Show help. |
+
+Without `--type`, `paste` picks the best text type (`text/plain;charset=utf-8` first), or the first offered type if there is no text.
+
+### Examples
 
 ```sh
-cargo build --release
-
 # copy an argument
 ./target/release/clip-for-fun-copy "hello world"
 
@@ -50,11 +90,16 @@ cat file.txt | ./target/release/clip-for-fun-copy
 
 # paste to stdout
 ./target/release/clip-for-fun-paste
+
+# list the offered types, then paste one of them
+./target/release/clip-for-fun-paste -l
+./target/release/clip-for-fun-paste -t image/png > shot.png
+
+# paste the primary selection without a trailing newline
+./target/release/clip-for-fun-paste -p -n
 ```
 
-Then paste anywhere. `copy` returns right away and a background process keeps serving the data until something else is copied, since on Wayland the owner of the clipboard has to serve the data itself. Without `--type`, input is offered as text.
-
-`paste` only handles text for now and exits with an error if the clipboard has no text type.
+On Wayland the owner of the clipboard has to serve the data itself, which is why `copy` leaves a background process running until something else is copied.
 
 For debug output, build without `--release`, run the binaries from `./target/debug/` instead, and pass `-f` to `copy` so the serving process keeps its stderr.
 
@@ -69,21 +114,4 @@ For debug output, build without `--release`, run the binaries from `./target/deb
 
 ## Todo
 
-- `paste`
-  - Trailing newline only when printing text to a terminal, `-n` to suppress
-  - `--type` and `--primary`
-  - Bigger pipe buffer (`F_SETPIPE_SZ`) for faster large pastes
-  - Non-text types, MIME type from the output file name
-- Integration tests: the real binaries against a headless compositor, in CI
-- `history`
-  - Daemon that watches the clipboard and saves every copy to disk, all of its MIME types, without blocking the Wayland connection
-  - Keeps the clipboard alive after the source app exits or clears it
-  - Restore any older entry to the clipboard
-  - Case-insensitive search over the full content, not just previews
-- `copy`
-  - `--file`: copy files the way a file manager does, so they paste into Nautilus, Dolphin or an upload dialog
-  - MIME type inferred from the input
-  - Zero-copy serving with `splice`, several pastes at once
-- Fallback to `zwlr_data_control_manager_v1` (river, Wayfire, older sway)
-- Benchmarks
-- Packaging for the major distros
+See [TODO.md](TODO.md).
