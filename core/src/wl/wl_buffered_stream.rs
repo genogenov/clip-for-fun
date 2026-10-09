@@ -23,7 +23,7 @@ struct ReadBuffer {
 }
 
 struct WriteBuffer {
-    buf: [u8; 1024],
+    buf: [u8; 4096],
     cursor: usize,
     fds: OutFdBuffer,
 }
@@ -54,7 +54,7 @@ impl WlBufferedStream {
                 fds: InFdBuffer::new(),
             },
             tx: WriteBuffer {
-                buf: [0u8; 1024],
+                buf: [0u8; 4096],
                 cursor: 0,
                 fds: OutFdBuffer::new(),
             },

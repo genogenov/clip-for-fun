@@ -1,6 +1,7 @@
 use std::{borrow::Cow, os::fd::OwnedFd};
 
 use crate::{
+    log_debug, parse_mime,
     unix_fd_stream::InFdBuffer,
     wl::{
         objects::{WlObject, wl_enum},
@@ -8,7 +9,6 @@ use crate::{
         wl_message_writer::WlMessageWriter,
     },
 };
-use std::io;
 
 const OFFER: u16 = 0;
 
@@ -46,6 +46,7 @@ pub const KNOWN_MIME_TYPES: [&str; 6] = [
     TEXT,
     TEXT_HTML,
 ];
+pub const MAX_OFFERED_MIME_TYPES: usize = 32;
 pub const OFFERED_TXT_MIME_TYPES: [&str; 5] =
     [TEXT_PLAIN_UTF8, UTF8_STRING, TEXT_PLAIN, STRING, TEXT];
 
@@ -95,25 +96,27 @@ impl WlDataControlOffer {
         &self.offered_mime_types
     }
 
-    pub fn push_offer(&mut self, mime: &[u8]) -> Result<(), io::Error> {
-        if self.offered_mime_types.len() >= 32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Too many offered mime types",
-            ));
+    pub fn push_offer(&mut self, mime: &[u8]) {
+        if self.offered_mime_types.len() >= MAX_OFFERED_MIME_TYPES {
+            log_debug!("Too many offered mime types, skipping additional offers");
+            return;
         }
-        if let Some(known) = KNOWN_MIME_TYPES.iter().find(|m| m.as_bytes() == mime) {
+
+        let parsed_mime = match parse_mime(mime) {
+            Ok(m) => m,
+            Err(_e) => {
+                log_debug!("Failed to parse mime, skipping: '{}'", _e);
+                return;
+            }
+        };
+
+        if self.offered_mime_types.iter().any(|m| m == parsed_mime) {
+        } else if let Some(known) = KNOWN_MIME_TYPES.iter().find(|m| **m == parsed_mime) {
             self.offered_mime_types.push(Cow::Borrowed(known));
-        } else if self.offered_mime_types.iter().any(|m| m.as_bytes() == mime) {
-            return Ok(());
         } else {
-            self.offered_mime_types.push(Cow::Owned(
-                str::from_utf8(mime)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
-                    .to_owned(),
-            ))
+            self.offered_mime_types
+                .push(Cow::Owned(parsed_mime.to_owned()))
         }
-        Ok(())
     }
 
     pub fn id(&self) -> u32 {
@@ -172,6 +175,86 @@ mod tests {
     use super::*;
     use crate::{FdWriteAndClose, wl::wl_buffered_stream::WlBufferedStream};
     use std::{io::Read, os::unix::net::UnixStream, time::Duration};
+
+    fn offer_with(types: &[&[u8]]) -> WlDataControlOffer {
+        let mut offer = WlDataControlOffer::new(0xff00_0000);
+        for mime in types {
+            offer.push_offer(mime);
+        }
+        offer
+    }
+
+    fn types(offer: &WlDataControlOffer) -> Vec<&str> {
+        offer
+            .offered_mime_types()
+            .iter()
+            .map(|m| m.as_ref())
+            .collect()
+    }
+
+    fn preferred(list: &[&str]) -> Option<String> {
+        let bytes: Vec<&[u8]> = list.iter().map(|m| m.as_bytes()).collect();
+        offer_with(&bytes)
+            .preferred_mime_type()
+            .map(|m| m.to_string())
+    }
+
+    #[test]
+    fn types_are_kept_in_order_without_duplicates_and_known_ones_do_not_allocate() {
+        let offer = offer_with(&[b"image/png", b"text/plain", b"image/png", b"text/plain"]);
+        assert_eq!(types(&offer), ["image/png", "text/plain"]);
+        assert!(matches!(offer.offered_mime_types()[0], Cow::Owned(_)));
+        assert!(matches!(offer.offered_mime_types()[1], Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn invalid_types_are_skipped_and_the_rest_still_recorded() {
+        let offer = offer_with(&[b"text/\x1b[31m", b"", b"text/\xff", b"text/html"]);
+        assert_eq!(types(&offer), ["text/html"]);
+    }
+
+    #[test]
+    fn types_beyond_the_cap_are_skipped() {
+        let names: Vec<String> = (0..MAX_OFFERED_MIME_TYPES + 5)
+            .map(|i| format!("application/x-{i}"))
+            .collect();
+        let bytes: Vec<&[u8]> = names.iter().map(|m| m.as_bytes()).collect();
+        let offer = offer_with(&bytes);
+        assert_eq!(offer.offered_mime_types().len(), MAX_OFFERED_MIME_TYPES);
+        assert_eq!(
+            offer.offered_mime_types().last().map(|m| m.as_ref()),
+            Some(names[MAX_OFFERED_MIME_TYPES - 1].as_str())
+        );
+    }
+
+    #[test]
+    fn preferred_type_is_best_known_text_then_other_text_then_first_type() {
+        assert_eq!(
+            preferred(&["text/html", "STRING", "UTF8_STRING", "image/png"]).as_deref(),
+            Some("UTF8_STRING")
+        );
+        assert_eq!(
+            preferred(&["image/png", "text/uri-list"]).as_deref(),
+            Some("text/uri-list")
+        );
+        assert_eq!(
+            preferred(&["image/png", "image/jpeg"]).as_deref(),
+            Some("image/png")
+        );
+        assert_eq!(preferred(&[]), None);
+    }
+
+    #[test]
+    fn asked_type_matches_exactly() {
+        let offer = offer_with(&[b"text/plain;charset=utf-8", b"image/png"]);
+        assert_eq!(
+            offer.asked_mime_type("image/png").map(|m| m.as_ref()),
+            Some("image/png")
+        );
+        for missing in ["image", "text/plain", "IMAGE/PNG"] {
+            assert!(offer.asked_mime_type(missing).is_none(), "{missing}");
+        }
+    }
 
     #[test]
     fn receive_sends_the_mime_and_the_fd_and_destroy_has_no_arguments() {

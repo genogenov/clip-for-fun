@@ -2,6 +2,7 @@
 
 #[doc(hidden)]
 mod log_writer;
+mod mime;
 mod unix_fd_stream;
 mod wl;
 
@@ -23,4 +24,5 @@ pub use wl::{
 };
 
 pub use log_writer::{Colors, LOGGER};
+pub use mime::parse_mime;
 pub use unix_fd_stream::FdWriteAndClose;

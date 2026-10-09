@@ -626,70 +626,85 @@ mod tests {
         dispatch_to_eof(&mut session);
     }
 
-    // #[test]
-    // fn paste_burst_is_routed_per_offer_and_tracks_both_selections() {
-    //     let (mut session, mut compositor) = session_with_device();
-    //     let (clipboard, primary) = (0xff00_0000u32, 0xff00_0001u32);
+    #[test]
+    fn paste_burst_is_routed_per_offer_and_tracks_both_selections() {
+        let (mut session, mut compositor) = session_with_device();
+        let (clipboard, primary) = (0xff00_0000u32, 0xff00_0001u32);
 
-    //     // What a compositor sends right after bind + get_data_device + sync, in one write.
-    //     let mut burst = msg(SEAT_ID, 0, &3u32.to_ne_bytes());
-    //     burst.extend(device_event(
-    //         WlDataControlDeviceEvents::DataOffer,
-    //         clipboard,
-    //     ));
-    //     burst.extend(mime_offer(clipboard, "text/html"));
-    //     burst.extend(mime_offer(clipboard, "text/plain;charset=utf-8"));
-    //     burst.extend(device_event(
-    //         WlDataControlDeviceEvents::Selection,
-    //         clipboard,
-    //     ));
-    //     burst.extend(device_event(WlDataControlDeviceEvents::DataOffer, primary));
-    //     burst.extend(mime_offer(primary, "text/plain"));
-    //     burst.extend(device_event(
-    //         WlDataControlDeviceEvents::PrimarySelection,
-    //         primary,
-    //     ));
-    //     burst.extend(msg(
-    //         CALLBACK_ID,
-    //         WlCallbackEvents::Done as u16,
-    //         &0u32.to_ne_bytes(),
-    //     ));
-    //     send_then_eof(&mut compositor, &burst);
+        // What a compositor sends right after bind + get_data_device + sync, in one write.
+        let mut burst = msg(SEAT_ID, 0, &3u32.to_ne_bytes());
+        burst.extend(device_event(
+            WlDataControlDeviceEvents::DataOffer,
+            clipboard,
+        ));
+        burst.extend(mime_offer(clipboard, "text/html"));
+        burst.extend(mime_offer(clipboard, "text/plain;charset=utf-8"));
+        burst.extend(device_event(
+            WlDataControlDeviceEvents::Selection,
+            clipboard,
+        ));
+        burst.extend(device_event(WlDataControlDeviceEvents::DataOffer, primary));
+        burst.extend(mime_offer(primary, "text/plain"));
+        burst.extend(device_event(
+            WlDataControlDeviceEvents::PrimarySelection,
+            primary,
+        ));
+        burst.extend(msg(
+            CALLBACK_ID,
+            WlCallbackEvents::Done as u16,
+            &0u32.to_ne_bytes(),
+        ));
+        send_then_eof(&mut compositor, &burst);
 
-    //     let mut mimes = Vec::new();
-    //     session
-    //         .dispatch_messages(&mut |ev| match ev {
-    //             WlEvent::DataControlOffer {
-    //                 id,
-    //                 event: DataControlOfferEvent::Offer { mime },
-    //             } => {
-    //                 mimes.push((id, mime.to_vec()));
-    //                 ControlFlow::Continue(())
-    //             }
-    //             WlEvent::SyncDone => ControlFlow::Break(Ok(())),
-    //             _ => ControlFlow::Continue(()),
-    //         })
-    //         .unwrap();
+        let mut mimes = Vec::new();
+        session
+            .dispatch_messages(&mut |ev| match ev {
+                WlEvent::DataControlOffer {
+                    id,
+                    event: DataControlOfferEvent::Offer { mime },
+                } => {
+                    mimes.push((id, mime.to_vec()));
+                    ControlFlow::Continue(())
+                }
+                WlEvent::SyncDone => ControlFlow::Break(Ok(())),
+                _ => ControlFlow::Continue(()),
+            })
+            .unwrap();
 
-    //     assert_eq!(
-    //         mimes,
-    //         [
-    //             (clipboard, b"text/html".to_vec()),
-    //             (clipboard, b"text/plain;charset=utf-8".to_vec()),
-    //             (primary, b"text/plain".to_vec()),
-    //         ]
-    //     );
-    //     let selected = session.get_offer().unwrap();
-    //     assert_eq!(
-    //         (selected.id(), selected.preferred_mime()),
-    //         (clipboard, Some("text/plain;charset=utf-8"))
-    //     );
-    //     let selected = session.get_primary_offer().unwrap();
-    //     assert_eq!(
-    //         (selected.id(), selected.preferred_mime()),
-    //         (primary, Some("text/plain"))
-    //     );
-    // }
+        assert_eq!(
+            mimes,
+            [
+                (clipboard, b"text/html".to_vec()),
+                (clipboard, b"text/plain;charset=utf-8".to_vec()),
+                (primary, b"text/plain".to_vec()),
+            ]
+        );
+        fn summary(offer: Option<&WlDataControlOffer>) -> (u32, Vec<&str>, Option<&str>) {
+            let offer = offer.unwrap();
+            let types = offer
+                .offered_mime_types()
+                .iter()
+                .map(|m| m.as_ref())
+                .collect();
+            (
+                offer.id(),
+                types,
+                offer.preferred_mime_type().map(|m| m.as_ref()),
+            )
+        }
+        assert_eq!(
+            summary(session.get_offer()),
+            (
+                clipboard,
+                vec!["text/html", "text/plain;charset=utf-8"],
+                Some("text/plain;charset=utf-8")
+            )
+        );
+        assert_eq!(
+            summary(session.get_primary_offer()),
+            (primary, vec!["text/plain"], Some("text/plain"))
+        );
+    }
 
     #[test]
     fn clearing_the_selection_destroys_the_previous_offer() {

@@ -1,8 +1,9 @@
 use std::fmt::Display;
 use std::io::Result;
+use std::os::unix::ffi::OsStrExt;
 use std::{ffi::OsString, path::PathBuf};
 
-use clip_for_fun_core::{Colors, LOGGER, log_debug};
+use clip_for_fun_core::{Colors, LOGGER, log_debug, parse_mime};
 
 #[derive(Debug, PartialEq)]
 pub enum Input {
@@ -47,7 +48,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
             b"--file" => out.files = true,
             b"--foreground" | b"-f" => out.foreground = true,
             b"-t" | b"--type" => {
-                out.mime = Some(parse_mime(args.next(), &program, &arg.display())?)
+                out.mime = Some(parse_mime_from_args(args.next(), &program, &arg.display())?)
             }
             b"--temp-dir" => {
                 out.temp_dir = Some(value(args.next(), &program, "--temp-dir")?.into())
@@ -130,30 +131,20 @@ fn value(next: Option<OsString>, program: &OsString, option: impl Display) -> Re
     })
 }
 
-fn parse_mime(next: Option<OsString>, program: &OsString, option: &impl Display) -> Result<String> {
-    let value = value(next, program, option)?.into_string().map_err(|_| {
+fn parse_mime_from_args(
+    next: Option<OsString>,
+    program: &OsString,
+    option: &impl Display,
+) -> Result<String> {
+    let arg_value = value(next, program, option)?;
+    let value = parse_mime(arg_value.as_bytes()).map_err(|e| {
         usage_error(
             program,
-            &format!(
-                "invalid mime type for option '{}' - only UTF-8 strings are allowed",
-                option
-            ),
+            &format!("invalid mime type for option '{}' - {e}", option),
         )
     })?;
 
-    if value.is_empty()
-        || value.len() > 255
-        || value.as_bytes().iter().any(|b| !b.is_ascii_graphic())
-    {
-        return Err(usage_error(
-            program,
-            &format!(
-                "invalid mime type for option '{}' - must be non-empty, at most 255 characters, and contain only ASCII graphic characters",
-                option
-            ),
-        ));
-    }
-    Ok(value)
+    Ok(value.to_owned())
 }
 
 #[cfg(test)]
@@ -286,15 +277,21 @@ mod tests {
 
     #[test]
     fn mime_types_are_validated() {
-        for mime in ["text/plain;charset=utf-8", "UTF8_STRING", &"a".repeat(255)] {
+        let libreoffice = r#"application/x-openoffice-objectdescriptor-xml;windows_formatname="Star Object Descriptor (XML)";displayname="file:///tmp/Résumé.docx""#;
+        for mime in [
+            "text/plain;charset=utf-8",
+            "UTF8_STRING",
+            libreoffice,
+            &"a".repeat(4000),
+        ] {
             assert_eq!(copy_args(&["-t", mime]).mime.as_deref(), Some(mime));
         }
         for mime in [
             "",
-            "text/plain charset",
             "text/\tplain",
-            "téxt/plain",
-            &"a".repeat(256),
+            "text/\u{1b}[31m",
+            "text/\u{9b}31m",
+            &"a".repeat(4001),
         ] {
             assert!(invalid(&["-t", mime]).contains("'-t'"), "{mime:?}");
         }

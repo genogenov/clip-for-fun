@@ -12,7 +12,6 @@ use crate::{
 use std::{
     io::{Error, Result},
     ops::ControlFlow,
-    result,
 };
 
 const SERVER_ID_START: u32 = 0xff000000;

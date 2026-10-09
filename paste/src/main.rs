@@ -14,8 +14,7 @@ use std::{
 };
 
 use clip_for_fun_core::{
-    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlEvent, WlSessionManager,
-    log_debug, log_error,
+    OFFERED_TXT_MIME_TYPES, WlBufferedStream, WlEvent, WlSessionManager, log_debug, log_error,
 };
 
 use crate::args::{Command, PasteArgs};
@@ -51,7 +50,7 @@ fn run() -> io::Result<()> {
 }
 
 fn init() -> io::Result<WlSessionManager> {
-        let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
+    let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
         .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
 
     let socket_path = PathBuf::from(&runtime_dir)

@@ -1,8 +1,8 @@
 use std::fmt::Display;
 use std::io::Result;
-use std::ffi::OsString;
+use std::{ffi::OsString, os::unix::ffi::OsStrExt};
 
-use clip_for_fun_core::{Colors, LOGGER, log_debug};
+use clip_for_fun_core::{Colors, LOGGER, log_debug, parse_mime};
 
 #[derive(Debug)]
 pub struct PasteArgs {
@@ -35,7 +35,7 @@ pub fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command> {
             }
             b"-n" | b"--no-newline" => out.no_newline = true,
             b"-t" | b"--type" => {
-                out.mime = Some(parse_mime(args.next(), &program, &arg.display())?)
+                out.mime = Some(parse_mime_from_args(args.next(), &program, &arg.display())?)
             }
             _ => {
                 return Err(usage_error(
@@ -96,28 +96,126 @@ fn value(next: Option<OsString>, program: &OsString, option: impl Display) -> Re
     })
 }
 
-fn parse_mime(next: Option<OsString>, program: &OsString, option: &impl Display) -> Result<String> {
-    let value = value(next, program, option)?.into_string().map_err(|_| {
+fn parse_mime_from_args(
+    next: Option<OsString>,
+    program: &OsString,
+    option: &impl Display,
+) -> Result<String> {
+    let arg_value = value(next, program, option)?;
+    let value = parse_mime(arg_value.as_bytes()).map_err(|e| {
         usage_error(
             program,
-            &format!(
-                "invalid mime type for option '{}' - only UTF-8 strings are allowed",
-                option
-            ),
+            &format!("invalid mime type for option '{}' - {e}", option),
         )
     })?;
 
-    if value.is_empty()
-        || value.len() > 255
-        || value.as_bytes().iter().any(|b| !b.is_ascii_graphic())
-    {
-        return Err(usage_error(
-            program,
-            &format!(
-                "invalid mime type for option '{}' - must be non-empty, at most 255 characters, and contain only ASCII graphic characters",
-                option
-            ),
-        ));
+    Ok(value.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{ffi::OsStr, io::ErrorKind, iter};
+
+    fn parse_os(args: Vec<OsString>) -> Result<Command> {
+        parse_args(iter::once(OsString::from("paste")).chain(args))
     }
-    Ok(value)
+
+    fn parse(args: &[&str]) -> Result<Command> {
+        parse_os(args.iter().map(OsString::from).collect())
+    }
+
+    fn paste_args(args: &[&str]) -> PasteArgs {
+        match parse(args) {
+            Ok(Command::Paste(parsed)) => parsed,
+            Ok(Command::Help(_)) => panic!("{args:?} parsed as --help"),
+            Ok(Command::ListTypes { .. }) => panic!("{args:?} parsed as --list-types"),
+            Err(err) => panic!("{args:?} failed: {err}"),
+        }
+    }
+
+    fn invalid(args: &[&str]) -> String {
+        match parse(args) {
+            Err(err) => {
+                assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+                err.to_string()
+            }
+            Ok(_) => panic!("{args:?} accepted"),
+        }
+    }
+
+    #[test]
+    fn no_arguments_pastes_the_best_clipboard_type() {
+        let parsed = paste_args(&[]);
+        assert!(!parsed.no_newline && !parsed.primary);
+        assert_eq!(parsed.mime, None);
+    }
+
+    #[test]
+    fn short_and_long_options() {
+        for flag in ["-p", "--primary"] {
+            assert!(paste_args(&[flag]).primary);
+        }
+        for flag in ["-n", "--no-newline"] {
+            assert!(paste_args(&[flag]).no_newline);
+        }
+        for flag in ["-t", "--type"] {
+            assert_eq!(
+                paste_args(&[flag, "image/png"]).mime.as_deref(),
+                Some("image/png")
+            );
+        }
+        let parsed = paste_args(&["-n", "-p", "-t", "text/html"]);
+        assert!(parsed.no_newline && parsed.primary);
+        assert_eq!(parsed.mime.as_deref(), Some("text/html"));
+    }
+
+    #[test]
+    fn list_types_keeps_the_selection_choice() {
+        for args in [
+            &["-l"][..],
+            &["--list-types"],
+            &["-p", "-l"],
+            &["-l", "--primary"],
+        ] {
+            let Ok(Command::ListTypes { primary }) = parse(args) else {
+                panic!("{args:?} did not list types");
+            };
+            assert_eq!(
+                primary,
+                args.iter()
+                    .any(|a| a.starts_with("-p") || *a == "--primary")
+            );
+        }
+    }
+
+    #[test]
+    fn help_wins_over_other_arguments() {
+        for args in [&["-h"][..], &["--help"], &["-p", "-l", "-h"]] {
+            let Ok(Command::Help(usage)) = parse(args) else {
+                panic!("{args:?} did not return help");
+            };
+            assert!(usage.contains("Usage:") && usage.contains("--no-newline"));
+        }
+    }
+
+    #[test]
+    fn type_needs_a_valid_value() {
+        for flag in ["-t", "--type"] {
+            assert!(invalid(&[flag]).contains(&format!("'{flag}'")), "{flag}");
+            assert!(invalid(&[flag, "text/\u{1b}[31m"]).contains(&format!("'{flag}'")));
+        }
+        let non_utf8 = OsStr::from_bytes(b"text/\xff").to_os_string();
+        let Err(err) = parse_os(vec![OsString::from("-t"), non_utf8]) else {
+            panic!("non-UTF-8 type accepted");
+        };
+        assert!(err.to_string().contains("'-t'"), "{err}");
+    }
+
+    #[test]
+    fn words_and_unknown_options_are_errors_that_name_them() {
+        for arg in ["hello", "-x", "--bogus", "-pn"] {
+            assert!(invalid(&[arg]).contains(&format!("'{arg}'")), "{arg}");
+        }
+    }
 }
