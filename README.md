@@ -5,7 +5,7 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
 
 ## What clip-for-fun is
 
-Command-line tools for the Wayland clipboard, built for terminals, scripts and keybindings. Options and examples are under [Usage](#usage).
+Tools for the Wayland clipboard. Options and examples are under [Usage](#usage).
 
 - **`clip-for-fun-copy`** puts text or any data on the clipboard or the primary (middle-click) selection. It returns immediately while a background process keeps the data available, so other apps - Wayland and X11 alike - can paste it until something else is copied. Large inputs don't fill up memory.
 - **`clip-for-fun-paste`** writes the clipboard or primary selection to stdout. It picks the best text type by default, can paste any specific type, and lists what is on offer.
@@ -13,32 +13,11 @@ Command-line tools for the Wayland clipboard, built for terminals, scripts and k
 
 ## Why
 
-A clipboard setup on Wayland today is assembled from separate projects: wl-clipboard for copy and paste, a history manager such as clipse or cliphist glued on with `wl-paste --watch` (which starts a new process for every copy), and often another tool for picking entries. Each has its own storage, its own quirks and its own idea of which types to keep.
-
 clip-for-fun aims to be one modern package for everything clipboard on current Wayland compositors - copy, paste, history and a UI/TUI - built on a single fast, dependency-free core and designed and tested together.
-
-## Technical principles
-
-- **Zero dependencies** for the core library, `copy` and `paste`: no libc crate, no libwayland. Only the `history` daemon will use crates (SQLite, image decoding, hashing).
-- **Hand-written Wayland wire protocol** over the Unix socket: message framing, object id routing, and file descriptor passing (`SCM_RIGHTS`) through hand-written `sendmsg`/`recvmsg` bindings.
-- **Minimal `unsafe`**: limited to a small FFI module (`sendmsg`, `recvmsg`, `fork`, `fcntl`, ...), each call with a `SAFETY` comment. Architecture-specific constants are checked against the kernel headers.
-- **No helper processes**: `copy` and `paste` read, serve and receive the data themselves without starting other programs, which keeps small copies and pastes fast.
-- **Zero-copy where the kernel allows it**: pastes are streamed with `splice` through an enlarged pipe.
-- **Bounded memory**: input over 128 KiB goes to an unnamed temp file (`O_TMPFILE`, or create + immediate unlink), so a 100 MiB copy uses ~2.3 MB of RAM and nothing is left on disk even if the process is killed.
-- **A well-behaved background process**: `copy` forks only after the compositor confirms the selection, so `copy x && paste` always sees `x`. The child gets its own session, `/` as its working directory and `/dev/null` as stdio, so it survives its terminal closing and never blocks `$(copy x)` or pipes.
-- **Other apps are untrusted**: MIME type names with control characters (terminal escape sequences) or invalid UTF-8 are skipped, offers are capped, and a malformed offer never stops `copy` or `paste`.
-
-## Benchmarks
-
-Coming soon.
-
-## Platforms
-
-Linux only. CI builds and tests on x86_64 and aarch64, and type-checks i686, armv7, powerpc64le, s390x, riscv64, loongarch64, sparc64 and x86_64 musl (architecture-specific constants such as `O_TMPFILE` and `SOL_SOCKET` differ between them).
 
 ## Usage
 
-Needs a compositor that supports `ext_data_control_manager_v1` (developed and tested on Hyprland). Build with `cargo build --release`; the binaries end up in `./target/release/`.
+Needs a compositor that supports `ext_data_control_manager_v1`. Build with `cargo build --release`; the binaries end up in `./target/release/`.
 
 ### `clip-for-fun-copy [options] [<text>...]`
 
@@ -102,6 +81,25 @@ cat file.txt | ./target/release/clip-for-fun-copy
 On Wayland the owner of the clipboard has to serve the data itself, which is why `copy` leaves a background process running until something else is copied.
 
 For debug output, build without `--release`, run the binaries from `./target/debug/` instead, and pass `-f` to `copy` so the serving process keeps its stderr.
+
+## Technical principles
+
+- **Zero dependencies** for the core library, `copy` and `paste`: no libc crate, no libwayland. Only the `history` daemon will use crates (SQLite, image decoding, hashing).
+- **Hand-written Wayland wire protocol** over the Unix socket: message framing, object id routing, and file descriptor passing (`SCM_RIGHTS`) through hand-written `sendmsg`/`recvmsg` bindings.
+- **Minimal `unsafe`**: limited to a small FFI module (`sendmsg`, `recvmsg`, `fork`, `fcntl`, ...), each call with a `SAFETY` comment. Architecture-specific constants are checked against the kernel headers.
+- **No helper processes**: `copy` and `paste` read, serve and receive the data themselves without starting other programs, which keeps small copies and pastes fast.
+- **Zero-copy where the kernel allows it**: pastes are streamed with `splice` through an enlarged pipe.
+- **Bounded memory**: input over 128 KiB goes to an unnamed temp file (`O_TMPFILE`, or create + immediate unlink), so a 100 MiB copy uses ~2.3 MB of RAM and nothing is left on disk even if the process is killed.
+- **A well-behaved background process**: `copy` forks only after the compositor confirms the selection, so `copy x && paste` always sees `x`. The child gets its own session, `/` as its working directory and `/dev/null` as stdio, so it survives its terminal closing and never blocks `$(copy x)` or pipes.
+- **Other apps are untrusted**: MIME type names with control characters (terminal escape sequences) or invalid UTF-8 are skipped, offers are capped, and a malformed offer never stops `copy` or `paste`.
+
+## Benchmarks
+
+Coming soon.
+
+## Platforms
+
+Linux only. CI builds and tests on x86_64 and aarch64, and type-checks i686, armv7, powerpc64le, s390x, riscv64, loongarch64, sparc64 and x86_64 musl (architecture-specific constants such as `O_TMPFILE` and `SOL_SOCKET` differ between them).
 
 ## Layout
 
