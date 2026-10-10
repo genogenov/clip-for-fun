@@ -7,6 +7,8 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
 
 Tools for the Wayland clipboard. Options and examples are under [Usage](#usage).
 
+The tools aim to be [as fast and as light on resources as possible, and at least as fast as the great `wl-copy` and `wl-paste` for the same behavior](BENCHMARKS.md), but not to implement all of wl-clipboard's functionality or to be backwards compatible with it.
+
 - **`clip-for-fun-copy`** puts text or any data on the clipboard or the primary (middle-click) selection. It returns immediately while a background process keeps the data available, so other apps - Wayland and X11 alike - can paste it until something else is copied. Large inputs don't fill up memory.
 - **`clip-for-fun-paste`** writes the clipboard or primary selection to stdout. It picks the best text type by default, can paste any specific type, and lists what is on offer.
 - **`clip-for-fun-history`** (planned) will remember every copy, keep the clipboard alive after the source app exits, and let you search and restore older entries, with a UI/TUI to browse them.
@@ -95,7 +97,7 @@ For debug output, build without `--release`, run the binaries from `./target/deb
 
 ## Benchmarks
 
-Coming soon.
+See [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Platforms
 
@@ -109,6 +111,7 @@ Linux only. CI builds and tests on x86_64 and aarch64, and type-checks i686, arm
 | `copy/` | `clip-for-fun-copy` |
 | `paste/` | `clip-for-fun-paste` |
 | `history/` (planned) | `clip-for-fun-history` daemon + queries |
+| `bench/` | `bench.sh`: the benchmark in [BENCHMARKS.md](BENCHMARKS.md) |
 
 ## Todo
 
