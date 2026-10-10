@@ -142,7 +142,8 @@ check_paste() {
 }
 
 echo "copy..." >&2
-text="'hello from clip-for-fun bench'"
+words="hello from clip-for-fun bench"
+text="'$words'"
 measure_copy copy-args cff "$runs" --prepare "sleep 0.05" "'$C' $text"
 measure_copy copy-args wl "$runs" --prepare "sleep 0.05" "wl-copy $text"
 measure_copy copy-small cff "$runs" --prepare "sleep 0.05" --input "$W/small" "'$C'"
@@ -175,19 +176,20 @@ esac
 cpu=$(awk -F': ' '/model name/ { print $2; exit }' /proc/cpuinfo)
 
 mem_mib() { awk '{ printf "%.1f", $1 / 1024 }' "$W/$1.mem"; }
+# row <case> <id> <clip-for-fun command> <wl-clipboard command>
 row() {
-  printf '| %s | %s ms | %s ms | %s MiB | %s MiB |\n' "$1" \
+  printf '| %s<br>`%s`<br>`%s` | %s ms | %s ms | %s MiB | %s MiB |\n' "$1" "$3" "$4" \
     "$(median_ms "$2.cff")" "$(median_ms "$2.wl")" "$(mem_mib "$2.cff")" "$(mem_mib "$2.wl")"
 }
 echo
 echo "| | clip-for-fun time | wl-clipboard time | clip-for-fun memory | wl-clipboard memory |"
-echo "|---|---:|---:|---:|---:|"
-row '`copy` text argument' copy-args
-row '`copy` 40 B from stdin' copy-small
-row '`copy` 100 MiB from stdin' copy-big
-row '`paste` 40 B' paste-small
-row '`paste` 100 MiB to `/dev/null`' paste-big-null
-row '`paste` 100 MiB to a file' paste-big-file
+echo "| --- | ---: | ---: | ---: | ---: |"
+row "Copy a ${#words} B text argument" copy-args 'clip-for-fun-copy <text>' 'wl-copy <text>'
+row 'Copy 40 B from stdin' copy-small clip-for-fun-copy 'wl-copy -t text/plain'
+row 'Copy 100 MiB from stdin' copy-big clip-for-fun-copy 'wl-copy -t text/plain'
+row 'Paste 40 B to `/dev/null`' paste-small 'clip-for-fun-paste -t text/plain' 'wl-paste -n -t text/plain'
+row 'Paste 100 MiB to `/dev/null`' paste-big-null 'clip-for-fun-paste -t text/plain' 'wl-paste -n -t text/plain'
+row 'Paste 100 MiB to a file' paste-big-file 'clip-for-fun-paste -t text/plain' 'wl-paste -n -t text/plain'
 echo
 echo "Median of $runs runs ($big_runs for 100 MiB) with $(hyperfine --version), $where, $(wl-copy --version | head -1), $cpu, Linux $(uname -r)."
 echo "Memory is resident memory: for copies, of the background process that keeps the copy available; for pastes, the median peak of 5 runs (for wl-paste, the larger of wl-paste and the cat it runs)."

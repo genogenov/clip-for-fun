@@ -6,12 +6,12 @@ Median times and memory measured with [`bench/bench.sh`](bench/bench.sh), which 
 
 | | clip-for-fun time | wl-clipboard time | clip-for-fun memory | wl-clipboard memory |
 | --- | ---: | ---: | ---: | ---: |
-| `copy` text argument | 2.10 ms | 2.31 ms | 0.9 MiB | 0.6 MiB |
-| `copy` 40 B from stdin | 2.08 ms | 3.74 ms | 0.9 MiB | 0.6 MiB |
-| `copy` 100 MiB from stdin | 31.61 ms | 33.71 ms | 1.0 MiB | 0.6 MiB |
-| `paste` 40 B | 0.87 ms | 1.58 ms | 1.9 MiB | 3.6 MiB |
-| `paste` 100 MiB to `/dev/null` | 2.59 ms | 4.59 ms | 1.9 MiB | 3.6 MiB |
-| `paste` 100 MiB to a file | 21.01 ms | 22.93 ms | 1.9 MiB | 3.6 MiB |
+| Copy a 29 B text argument<br>`clip-for-fun-copy <text>`<br>`wl-copy <text>` | 2.10 ms | 2.31 ms | 0.9 MiB | 0.6 MiB |
+| Copy 40 B from stdin<br>`clip-for-fun-copy`<br>`wl-copy -t text/plain` | 2.08 ms | 3.74 ms | 0.9 MiB | 0.6 MiB |
+| Copy 100 MiB from stdin<br>`clip-for-fun-copy`<br>`wl-copy -t text/plain` | 31.61 ms | 33.71 ms | 1.0 MiB | 0.6 MiB |
+| Paste 40 B to `/dev/null`<br>`clip-for-fun-paste -t text/plain`<br>`wl-paste -n -t text/plain` | 0.87 ms | 1.58 ms | 1.9 MiB | 3.6 MiB |
+| Paste 100 MiB to `/dev/null`<br>`clip-for-fun-paste -t text/plain`<br>`wl-paste -n -t text/plain` | 2.59 ms | 4.59 ms | 1.9 MiB | 3.6 MiB |
+| Paste 100 MiB to a file<br>`clip-for-fun-paste -t text/plain`<br>`wl-paste -n -t text/plain` | 21.01 ms | 22.93 ms | 1.9 MiB | 3.6 MiB |
 
 Memory is resident memory (RSS). For copies it is the background process that keeps the copy available until the next copy; for pastes it is the median peak of 5 runs, and for wl-paste, which runs `cat`, the larger of the two processes.
 
