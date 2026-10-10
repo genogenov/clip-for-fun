@@ -7,7 +7,7 @@ Inspired by [wl-clipboard](https://github.com/bugaevc/wl-clipboard).
 
 Tools for the Wayland clipboard. Options and examples are under [Usage](#usage).
 
-The tools aim to be [as fast and as light on resources as possible, and at least as fast as the great `wl-copy` and `wl-paste` for the same behavior](BENCHMARKS.md), but not to implement all of wl-clipboard's functionality or to be backwards compatible with it.
+The tools aim to be [as fast and as light on resources](BENCHMARKS.md) as possible, and at least as fast as the great `wl-copy` and `wl-paste` for the same behavior, but not to implement all of wl-clipboard's functionality or to be backwards compatible with it.
 
 - **`clip-for-fun-copy`** puts text or any data on the clipboard or the primary (middle-click) selection. It returns immediately while a background process keeps the data available, so other apps - Wayland and X11 alike - can paste it until something else is copied. Large inputs don't fill up memory.
 - **`clip-for-fun-paste`** writes the clipboard or primary selection to stdout. It picks the best text type by default, can paste any specific type, and lists what is on offer.
